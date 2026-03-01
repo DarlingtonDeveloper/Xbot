@@ -63,7 +63,11 @@ WRONG: {"toolName": "search-google", "params": {"query": "cats"}}
 1. Use browser_navigate to go to a page
 2. Use browser_snapshot to see what's on the page and get element refs
 3. Use browser_fallback or ami_execute to interact with elements
-4. Always take a snapshot after actions to see the result"""
+4. Always take a snapshot after actions to see the result
+
+## Important: Tool creation ordering
+When no saved tools exist for a site, ALWAYS complete the user's task first using browser_fallback.
+Only create configs and tools (add_create-config, add_tool) AFTER you have finished the action and verified the result with a snapshot."""
 
 # Shared state between threads
 VERBOSE = True
