@@ -59,11 +59,18 @@ Execute a saved tool for the current site. Parameters go in "args", NOT "params"
 Example: {"toolName": "search-google", "args": {"query": "cats"}}
 WRONG: {"toolName": "search-google", "params": {"query": "cats"}}
 
+### ami_memory
+Search your memory of saved sites and tools by natural language query.
+Example: {"query": "order food"}, {"query": "book a flight"}, {"query": "search for products"}
+Returns matching sites with their descriptions and available tools.
+
 ## Workflow
-1. Use browser_navigate to go to a page
-2. Use browser_snapshot to see what's on the page and get element refs
-3. Use browser_fallback or ami_execute to interact with elements
-4. Always take a snapshot after actions to see the result
+1. **When the user expresses an intent** (e.g. "order me a pizza", "find cheap flights", "check the news") but does NOT name a specific URL, you MUST call ami_memory first to check if a relevant site/tool is already saved. Never skip this step — go straight to memory before trying to navigate or search.
+2. If ami_memory returns results, use browser_navigate to go to the best match, then ami_execute to run its saved tools.
+3. Only if ami_memory returns no results should you fall back to navigating manually (e.g. Google search).
+4. Use browser_snapshot to see what's on the page and get element refs
+5. Use browser_fallback or ami_execute to interact with elements
+6. Always take a snapshot after actions to see the result
 
 ## Important: Tool creation ordering
 When no saved tools exist for a site, ALWAYS complete the user's task first using browser_fallback.
@@ -74,8 +81,12 @@ VERBOSE = True
 
 current_text = [""]
 current_action = [""]
+current_thinking = [False]
 viz_ref = [None]
 state_lock = threading.Lock()
+
+THINKING_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+thinking_frame = [0]
 browser_ready = threading.Event()
 
 
@@ -147,9 +158,14 @@ def run_overlay():
         with state_lock:
             text = current_text[0]
             action = current_action[0]
+            thinking = current_thinking[0]
         speech_label.configure(text=text)
         if VERBOSE and action:
-            action_label.configure(text=f" -> {{{action}}}")
+            action_label.configure(text=f" -> {{{action}}}", text_color="white")
+        elif thinking:
+            spinner = THINKING_FRAMES[thinking_frame[0] % len(THINKING_FRAMES)]
+            action_label.configure(text=f" {spinner} thinking", text_color="#a78bfa")
+            thinking_frame[0] += 1
         else:
             action_label.configure(text="")
         root.after(50, update_text)
@@ -221,11 +237,14 @@ async def audio_receiver(ws, mcp_session: ClientSession):
                 with state_lock:
                     current_text[0] = transcript
                     current_action[0] = ""
+                    current_thinking[0] = True
 
         elif event_type == "response.audio_transcript.done":
             transcript = event.get("transcript", "").strip()
             if transcript:
                 print(f"\nAssistant: {transcript}")
+                with state_lock:
+                    current_thinking[0] = False
 
         # --- Function calling ---
         elif event_type == "response.function_call_arguments.delta":
@@ -251,6 +270,7 @@ async def audio_receiver(ws, mcp_session: ClientSession):
             print(f"\n  [Tool: {name}]")
             with state_lock:
                 current_action[0] = name
+                current_thinking[0] = False
 
             try:
                 tool_args = json.loads(arguments_str) if arguments_str else {}
@@ -292,9 +312,18 @@ async def audio_receiver(ws, mcp_session: ClientSession):
 
             # Ask the model to continue with the tool result
             await ws.send(json.dumps({"type": "response.create"}))
+            with state_lock:
+                current_action[0] = ""
+                current_thinking[0] = True
 
         elif event_type == "response.done":
-            pass
+            with state_lock:
+                current_thinking[0] = False
+                current_action[0] = ""
+
+        elif event_type == "response.text.delta":
+            with state_lock:
+                current_thinking[0] = False
 
         elif event_type == "error":
             err = event.get("error", {})
