@@ -1,21 +1,37 @@
+import asyncio
 import asyncpg
 import json
 import os
+from functools import partial
+
+import boto3
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 
 load_dotenv()
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-_openai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+_bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name=os.environ["AWS_DEFAULT_REGION"],
+    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    aws_session_token=os.environ["AWS_SESSION_TOKEN"],
+)
 
 
 async def _embed(text: str, **_) -> list[float]:
-    response = await _openai.embeddings.create(
-        model="text-embedding-3-small",
-        input=text,
+    body = json.dumps({"inputText": text})
+    response = await asyncio.to_thread(
+        partial(
+            _bedrock.invoke_model,
+            modelId="amazon.titan-embed-text-v1",
+            body=body,
+            contentType="application/json",
+            accept="*/*",
+        )
     )
-    return response.data[0].embedding
+    result = json.loads(response["body"].read())
+    return result["embedding"]
 
 
 def _embedding_to_str(embedding: list[float]) -> str:
