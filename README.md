@@ -8,12 +8,37 @@
 
 ---
 
-## Overview
+## How It Works
 
-Ami consists of two modules:
+### ami-browser: Smart Browser Automation
 
-- **ami-browser** — An MCP server that exposes browser tools (navigate, snapshot, click, type, etc.) to any LLM via the [Model Context Protocol](https://modelcontextprotocol.io/). Built on [Playwright](https://playwright.dev).
-- **execution** — A real-time audio interface powered by the Mistral Realtime API. Streams your voice to the model, which decides when to use browser tools via MCP. Includes a Tkinter overlay for live transcription and audio visualization.
+ami-browser is an [MCP](https://modelcontextprotocol.io/) server that sits on top of [Playwright](https://playwright.dev) and adds a layer of **stored tools and memory**. Most things we do on the web are things we've done before: searching, adding to cart, checking out. ami-browser takes advantage of this by learning and reusing procedures.
+
+When you navigate to a site:
+
+1. **Known site**: ami-browser looks up the domain and URL pattern in its database. If it finds stored tools (e.g. `search-products`, `add-to-cart`), they're immediately available. The LLM calls them by name with parameters, and ami-browser translates them into Playwright actions. Fast, cheap, no page parsing needed.
+
+2. **New site**: No stored tools exist yet, so ami-browser falls back to raw Playwright tools (snapshot, click, type). As the LLM explores the page, ami-browser nudges it to save what it learns as reusable tools (CSS selectors, form fields, submit actions, and result extraction) so the next visit is instant.
+
+This means ami-browser gets smarter over time. The first visit to a site is exploratory. Every visit after that reuses stored procedures, saving tokens, time, and money.
+
+### execution: Voice-Driven Agent
+
+The execution module connects your voice to the browser through a real-time audio pipeline:
+
+```
+🎤 You speak
+ ↓  Microphone captures PCM audio, streams to API
+🧠 OpenAI Realtime API (gpt-4o)
+ ↓  Transcribes speech, reasons, decides which tools to call
+🔧 Tool calls routed to ami-browser via MCP
+ ↓  ami-browser executes browser actions (stored or fallback)
+📋 Results sent back to the model
+ ↓  Model synthesizes a spoken response
+🔊 You hear the answer
+```
+
+The agent uses server-side voice activity detection to know when you've finished speaking, runs any necessary browser tools, and responds in natural speech. A Tkinter overlay shows live transcription and an audio waveform on top of the browser window.
 
 ## Project Structure
 
@@ -85,7 +110,7 @@ uv run python audio_ami.py
 
 ### Using ami-browser as an MCP server
 
-This package is **not published to npm**, so you cannot use `npx ami-browser`. Instead, point your MCP client to the local CLI entry point using `node`:
+Point your MCP client to the local CLI entry point using `node`:
 
 ```json
 {
