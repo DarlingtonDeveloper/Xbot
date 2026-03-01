@@ -1,6 +1,7 @@
 'use strict';
 
 const { Pool } = require('pg');
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const path = require('path');
 
 // Load .env from project root
@@ -29,16 +30,48 @@ class ActionStore {
       poolConfig.ssl = { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
 
     this._pool = new Pool(poolConfig);
+
+    this._bedrock = new BedrockRuntimeClient({
+      region: process.env.AWS_DEFAULT_REGION,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        sessionToken: process.env.AWS_SESSION_TOKEN,
+      },
+    });
+  }
+
+  // ─── Embedding ───
+
+  async _embed(text) {
+    const body = JSON.stringify({ inputText: text });
+    const command = new InvokeModelCommand({
+      modelId: 'amazon.titan-embed-text-v1',
+      body,
+      contentType: 'application/json',
+      accept: '*/*',
+    });
+    const response = await this._bedrock.send(command);
+    const result = JSON.parse(new TextDecoder().decode(response.body));
+    return result.embedding;
   }
 
   // ─── Config CRUD ───
 
   async createConfig({ domain, urlPattern, title, description, tags }) {
+    const resolvedTitle = title || domain;
+    const resolvedDescription = description || '';
+    const resolvedTags = tags || [];
+
+    const embedInput = `${resolvedTitle}. ${resolvedDescription}. ${resolvedTags.join(' ')}`;
+    const embedding = await this._embed(embedInput);
+    const embeddingStr = '[' + embedding.join(',') + ']';
+
     const res = await this._pool.query(
-      `INSERT INTO configs (domain, url_pattern, title, description, tags)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO configs (domain, url_pattern, title, description, tags, embedding)
+       VALUES ($1, $2, $3, $4, $5, $6::vector)
        RETURNING *`,
-      [domain, urlPattern || '/*', title || domain, description || '', tags ? JSON.stringify(tags) : null]
+      [domain, urlPattern || '/*', resolvedTitle, resolvedDescription, tags ? JSON.stringify(tags) : null, embeddingStr]
     );
     return res.rows[0];
   }
@@ -215,6 +248,34 @@ class ActionStore {
       [domain, toolName]
     );
     return res.rows[0] || null;
+  }
+
+  // Semantic search — returns configs + their tools ranked by embedding similarity
+  async searchConfigsByQuery(query, limit = 5) {
+    const embedding = await this._embed(query);
+    const embeddingStr = '[' + embedding.join(',') + ']';
+
+    const res = await this._pool.query(
+      `SELECT c.id, c.domain, c.url_pattern, c.title, c.description, c.tags
+       FROM configs c
+       ORDER BY c.embedding <=> $1::vector
+       LIMIT $2`,
+      [embeddingStr, limit]
+    );
+
+    // For each config, fetch its tools
+    const configs = [];
+    for (const row of res.rows) {
+      const toolsRes = await this._pool.query(
+        'SELECT name, description FROM tools WHERE config_id = $1 ORDER BY created_at',
+        [row.id]
+      );
+      configs.push({
+        ...row,
+        tools: toolsRes.rows,
+      });
+    }
+    return configs;
   }
 
   // Find a tool by name across ALL configs

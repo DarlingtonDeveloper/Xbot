@@ -170,6 +170,22 @@ Provide the tool name and only the fields you want to update. Uses the current d
   type: 'action',
 };
 
+const amiMemorySearchSchema = {
+  name: 'ami_memory',
+  title: 'Search memory for saved sites and tools',
+  description: `Search your memory of previously visited sites and saved tools by natural language query.
+<usage-rules>
+- Use this when the user wants something but you don't know which site to go to.
+- Use this when no saved tools exist for the current page.
+- Returns matching sites with their descriptions and available tools.
+- After getting results, use browser_navigate to go to the relevant site.
+</usage-rules>`,
+  inputSchema: z.object({
+    query: z.string().describe('Natural language description of what the user wants (e.g., "order food", "book a flight", "search for products")'),
+  }),
+  type: 'readOnly',
+};
+
 const addDeleteToolSchema = {
   name: 'add_delete-tool',
   title: 'Delete a tool',
@@ -184,6 +200,7 @@ const addDeleteToolSchema = {
 module.exports = {
   amiExecuteSchema,
   browserFallbackSchema,
+  amiMemorySearchSchema,
   addCreateConfigSchema,
   addToolSchema,
   addUpdateToolSchema,

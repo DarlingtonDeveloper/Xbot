@@ -59,11 +59,22 @@ Execute a saved tool for the current site. Parameters go in "args", NOT "params"
 Example: {"toolName": "search-google", "args": {"query": "cats"}}
 WRONG: {"toolName": "search-google", "params": {"query": "cats"}}
 
+### add_create-config
+Create a config for a domain. Use bare domain like "amazon.com", NOT "https://www.amazon.com".
+Example: {"domain": "amazon.com", "title": "Amazon", "description": "Online shopping", "tags": ["shopping"]}
+
+### ami_memory
+Search your memory for previously visited sites and saved tools by natural language query.
+Use this when the user wants something but you don't know which site to go to, or no saved tools exist for the current page.
+Example: {"query": "I want to order food"}
+
 ## Workflow
-1. Use browser_navigate to go to a page
-2. Use browser_snapshot to see what's on the page and get element refs
-3. Use browser_fallback or ami_execute to interact with elements
-4. Always take a snapshot after actions to see the result"""
+1. If the user wants something but you don't know which site to use, call ami_memory first to search your saved sites and tools.
+2. Use browser_navigate to go to a page
+3. If the navigation response says no configs exist for this domain, you MUST immediately call add_create-config before doing anything else. Use the base domain, a short title, a brief description of the site, and relevant tags.
+4. Use browser_snapshot to see what's on the page and get element refs
+5. Use browser_fallback or ami_execute to interact with elements
+6. Always take a snapshot after actions to see the result"""
 
 # Shared state between threads
 VERBOSE = True
@@ -244,9 +255,12 @@ async def audio_receiver(ws, mcp_session: ClientSession):
 
             pending_calls.pop(call_id, None)
 
-            print(f"\n  [Tool: {name}]")
+            display_name = name
+            if name == "ami_execute" and tool_args.get("toolName"):
+                display_name = f"{name} -> {tool_args['toolName']}"
+            print(f"\n  [Tool: {display_name}]")
             with state_lock:
-                current_action[0] = name
+                current_action[0] = display_name
 
             try:
                 tool_args = json.loads(arguments_str) if arguments_str else {}

@@ -10,6 +10,7 @@ const { translateAction } = require('./action-translator');
 const {
   amiExecuteSchema,
   browserFallbackSchema,
+  amiMemorySearchSchema,
   addCreateConfigSchema,
   addToolSchema,
   addUpdateToolSchema,
@@ -99,6 +100,7 @@ class AmiBackend {
       snapshotSchema,
       browserFallbackSchema,
       amiExecuteSchema,
+      amiMemorySearchSchema,
       addCreateConfigSchema,
       addToolSchema,
       addUpdateToolSchema,
@@ -116,6 +118,8 @@ class AmiBackend {
         return this._handleFallback(rawArguments, progress);
       case 'ami_execute':
         return this._handleExecute(rawArguments, progress);
+      case 'ami_memory':
+        return this._handleMemorySearch(rawArguments);
       case 'add_create-config':
         return this._handleCreateConfig(rawArguments);
       case 'add_tool':
@@ -482,6 +486,54 @@ After completing your task:
     const result = await this._inner.callTool('browser_run_code', { code }, progress);
     const header = `### Executed: ${tool.name}\n`;
     return prependTextToResult(result, header);
+  }
+
+  // ─── ami_memory (semantic search) ───
+
+  async _handleMemorySearch(args) {
+    const { query } = args;
+
+    if (!query) {
+      return {
+        content: [{ type: 'text', text: '### Error\nMissing "query" parameter.' }],
+        isError: true,
+      };
+    }
+
+    try {
+      const configs = await this._store.searchConfigsByQuery(query);
+
+      if (configs.length === 0) {
+        return {
+          content: [{ type: 'text', text: `### No results\nNo saved sites match "${query}". Try navigating to a site manually with browser_navigate.` }],
+        };
+      }
+
+      let text = `### Memory search results for "${query}"\n\n`;
+      for (const config of configs) {
+        text += `**${config.title}** — \`${config.domain}\`\n`;
+        if (config.description) {
+          text += `  ${config.description}\n`;
+        }
+        if (config.tools.length > 0) {
+          text += `  Tools: ${config.tools.map(t => `\`${t.name}\``).join(', ')}\n`;
+        } else {
+          text += `  No saved tools yet.\n`;
+        }
+        text += '\n';
+      }
+
+      text += `Use \`browser_navigate\` to go to the relevant site, then use \`ami_execute\` to run its saved tools.`;
+
+      return {
+        content: [{ type: 'text', text }],
+      };
+    } catch (e) {
+      return {
+        content: [{ type: 'text', text: `### Error searching memory\n${e.message || String(e)}` }],
+        isError: true,
+      };
+    }
   }
 
   // ─── add_create-config ───
