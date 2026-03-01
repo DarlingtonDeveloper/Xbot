@@ -4,7 +4,7 @@ const { Pool } = require('pg');
 const path = require('path');
 
 // Load .env from project root
-const envPath = path.join(__dirname, '..', '.env');
+const envPath = path.join(__dirname, '..', '..', '.env');
 try {
   const fs = require('fs');
   const envContent = fs.readFileSync(envPath, 'utf-8');

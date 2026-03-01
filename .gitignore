@@ -23,9 +23,8 @@ venv/
 test-results/
 playwright-report/
 
+# Browser sessions
+sessions/
+
 # Supabase temp
 supabase/.temp/
-
-# Lock files (optional - uncomment if you want to track them)
-# uv.lock
-# package-lock.json
