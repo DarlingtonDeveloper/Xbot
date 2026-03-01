@@ -18,6 +18,10 @@ from mcp.client.stdio import stdio_client
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    sys.exit("Error: OPENAI_API_KEY environment variable is not set. "
+             "Add it to your .env file or export it in your shell.")
+
 REALTIME_MODEL = "gpt-4o-realtime-preview"
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 
@@ -74,7 +78,7 @@ browser_ready = threading.Event()
 # ── Overlay ────────────────────────────────────────────────────────────────────
 
 def get_chrome_bounds():
-    """Returns (left, top, right, bottom) of the front Chrome window via AppleScript."""
+    """Returns (left, top, right, bottom) of the front Chrome window via AppleScript (macOS only)."""
     script = 'tell application "Google Chrome" to get bounds of front window'
     try:
         result = subprocess.run(["osascript", "-e", script],

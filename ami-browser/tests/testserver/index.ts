@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+import { execSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
@@ -43,10 +44,19 @@ export class TestServer {
   }
 
   static async createHTTPS(port: number): Promise<TestServer> {
+    const dir = path.dirname(__filename);
+    const keyPath = path.join(dir, 'key.pem');
+    const certPath = path.join(dir, 'cert.pem');
+    const sanPath = path.join(dir, 'san.cnf');
+
+    // Generate self-signed test certs if they don't exist
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+      execSync(`openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 -keyout key.pem -out cert.pem -config san.cnf -extensions v3_req`, { cwd: dir, stdio: 'pipe' });
+    }
+
     const server = new TestServer(port, {
-      key: await fs.promises.readFile(path.join(path.dirname(__filename), 'key.pem')),
-      cert: await fs.promises.readFile(path.join(path.dirname(__filename), 'cert.pem')),
-      passphrase: 'aaaa',
+      key: await fs.promises.readFile(keyPath),
+      cert: await fs.promises.readFile(certPath),
     });
     await new Promise(x => server._server.once('listening', x));
     return server;

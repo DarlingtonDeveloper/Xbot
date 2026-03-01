@@ -21,10 +21,14 @@ try {
 
 class ActionStore {
   constructor() {
-    this._pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    });
+    if (!process.env.DATABASE_URL)
+      throw new Error('Missing required environment variable: DATABASE_URL');
+
+    const poolConfig = { connectionString: process.env.DATABASE_URL };
+    if (process.env.DATABASE_SSL === 'true')
+      poolConfig.ssl = { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
+
+    this._pool = new Pool(poolConfig);
   }
 
   // ─── Config CRUD ───

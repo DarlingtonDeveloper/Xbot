@@ -4,14 +4,12 @@
   "description": "Ami Browser - MCP server for browser automation via Playwright",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Joakim-Sael/playwright-mcp.git"
+    "url": "git+https://github.com/felofix/ami.git"
   },
   "engines": {
     "node": ">=18"
   },
-  "author": {
-    "name": "Microsoft Corporation"
-  },
+  "author": "Ami contributors",
   "license": "Apache-2.0",
   "scripts": {
     "test": "playwright test",

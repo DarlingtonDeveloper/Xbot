@@ -32,6 +32,11 @@ ALTER TABLE "tools" ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE "tools" ADD CONSTRAINT "tools_config_id_configs_id_fk" FOREIGN KEY ("config_id") REFERENCES "public"."configs"("id") ON DELETE cascade ON UPDATE no action;
 
+-- RLS policies: allow all operations for authenticated and anonymous roles
+-- (self-hosted setup; tighten for multi-tenant use)
+CREATE POLICY "allow_all_configs" ON "configs" FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all_tools"   ON "tools"   FOR ALL USING (true) WITH CHECK (true);
+
 CREATE INDEX "idx_configs_domain" ON "configs" USING btree ("domain");
 CREATE UNIQUE INDEX "configs_domain_url_unique" ON "configs" USING btree ("domain","url_pattern");
 CREATE INDEX "idx_configs_embedding" ON "configs" USING hnsw ("embedding" vector_cosine_ops);
