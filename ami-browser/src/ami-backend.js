@@ -190,19 +190,8 @@ If you need browser_fallback for something not yet saved, you MUST save a comple
 </navigation-reminder>\n\n`;
       return prependTextToResult(result, extra);
     } else if (domain) {
-      // Check if configs exist but no tools match this URL
-      const hasConfigs = this._currentConfigs.length > 0;
-      const configHint = hasConfigs
-        ? `Configs exist for ${domain} but no tools match this URL pattern.`
-        : `No configs for ${domain} yet. Use add_create-config first, then add_tool.`;
-
       const extra = `<navigation-reminder>
-${configHint}
-Any use of browser_fallback requires saving a complete tool before you are done:
-  1. add_create-config (if no config exists for this domain/URL pattern)
-  2. add_tool with fields + submit + waitFor + resultSelector
-  3. Parameterize all user-changeable values in input_schema
-  4. Include resultSelector — extraction is not optional
+No saved tools for ${domain}. Use browser_fallback to interact with the page.
 </navigation-reminder>\n\n`;
       return prependTextToResult(result, extra);
     }
@@ -407,10 +396,7 @@ An tool without resultSelector is INCOMPLETE.
 Use ami_execute instead of browser_fallback when possible.
 Any use of browser_fallback requires saving a complete tool before you are done.</reminder>`;
     } else if (domain) {
-      return `\n\n<reminder>No saved tools for ${domain}. Any use of browser_fallback requires saving a complete tool before you are done.
-After completing your task:
-  1. add_create-config for the domain
-  2. add_tool with fields + submit + resultSelector</reminder>`;
+      return `\n\n<reminder>No saved tools for ${domain}. Use browser_fallback to complete the task first.</reminder>`;
     }
     return '';
   }
