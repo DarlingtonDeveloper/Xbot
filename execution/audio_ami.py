@@ -31,7 +31,7 @@ AMI_BROWSER_PATH = os.path.join(
     os.path.dirname(__file__), "..", "ami-browser", "cli.js"
 )
 
-SYSTEM_PROMPT = """You are a helpful AI assistant that can browse the web using browser tools. Always respond in English only.
+SYSTEM_PROMPT = """You are a helpful AI assistant called Ami that can browse the web using browser tools. Always respond in English only.
 
 ## Tool usage rules
 
@@ -129,9 +129,11 @@ def run_overlay():
             x = left
             y = bottom - H
             root.geometry(f"{w}x{H}+{x}+{y}")
-        root.wm_attributes("-topmost", True)
-        root.lift()
-        root.after(500, sync_position)
+            root.wm_attributes("-topmost", True)
+            root.lift()
+            root.after(500, sync_position)
+        else:
+            root.destroy()
 
     def update_text():
         with state_lock:
@@ -147,11 +149,15 @@ def run_overlay():
     root.withdraw()
 
     def show_when_ready():
-        sync_position()
-        root.deiconify()
-        update_text()
+        bounds = get_chrome_bounds()
+        if bounds:
+            sync_position()
+            root.deiconify()
+            update_text()
+        else:
+            root.after(200, show_when_ready)
 
-    root.after(500, show_when_ready)
+    root.after(200, show_when_ready)
     root.mainloop()
 
 
@@ -306,6 +312,14 @@ async def async_main():
         async with ClientSession(read, write) as mcp_session:
             await mcp_session.initialize()
 
+            # Browser window is open — signal overlay to snap onto it immediately
+            browser_ready.set()
+
+            # Navigate to Google as the default home page
+            print("Navigating to Google...")
+            await mcp_session.call_tool("browser_navigate", {"url": "https://www.google.com"})
+            print("Ready on Google.")
+
             # Discover MCP tools
             tools_result = await mcp_session.list_tools()
             realtime_tools = mcp_tools_to_realtime_functions(tools_result.tools)
@@ -313,8 +327,6 @@ async def async_main():
             print(f"Connected! {len(realtime_tools)} tools available:")
             for t in realtime_tools:
                 print(f"  - {t['name']}")
-
-            browser_ready.set()
 
             # Audio input queue
             audio_queue: asyncio.Queue = asyncio.Queue()
