@@ -1,7 +1,7 @@
 {
-  "name": "parrot-browser",
+  "name": "ami-browser",
   "version": "0.0.68",
-  "description": "Parrot Browser - MCP server for browser automation via Playwright",
+  "description": "Ami Browser - MCP server for browser automation via Playwright",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Joakim-Sael/playwright-mcp.git"
@@ -35,6 +35,6 @@
     "@types/node": "^24.3.0"
   },
   "bin": {
-    "parrot-browser": "cli.js"
+    "ami-browser": "cli.js"
   }
 }

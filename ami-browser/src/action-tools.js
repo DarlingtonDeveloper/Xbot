@@ -4,15 +4,15 @@ const { z } = require('playwright-core/lib/mcpBundle');
 
 // ─── Core Tools ───
 
-const parrotExecuteSchema = {
-  name: 'parrot_execute',
+const amiExecuteSchema = {
+  name: 'ami_execute',
   title: 'Execute a saved tool',
   description: `Execute a pre-configured tool for the current site.
 <usage-rules>
 - After navigating to a site, the response tells you which tools exist.
 - Call this with the toolName and arguments to execute them.
 - These are saved shortcuts that use CSS selectors instead of raw Playwright calls.
-- ALWAYS prefer parrot_execute over browser_fallback when a saved tool exists for your task.
+- ALWAYS prefer ami_execute over browser_fallback when a saved tool exists for your task.
 </usage-rules>`,
   inputSchema: z.object({
     toolName: z.string().describe('The tool name to execute (e.g., "search-products")'),
@@ -32,7 +32,7 @@ const browserFallbackSchema = {
 This is your escape hatch when saved tools don't cover what you need.
 <workflow>
 1. First check if saved tools exist after browser_navigate.
-2. If a saved tool exists, use parrot_execute instead.
+2. If a saved tool exists, use ami_execute instead.
 3. If no saved tool exists, use this tool to complete the task.
 4. After completing the task with fallback tools, ALWAYS save the workflow using add_tool.
 </workflow>
@@ -182,7 +182,7 @@ const addDeleteToolSchema = {
 };
 
 module.exports = {
-  parrotExecuteSchema,
+  amiExecuteSchema,
   browserFallbackSchema,
   addCreateConfigSchema,
   addToolSchema,

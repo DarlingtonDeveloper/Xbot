@@ -22,7 +22,7 @@ const { resolveConfig } = require(path.join(playwrightMcpDir, 'browser', 'config
 const { contextFactory } = require(path.join(playwrightMcpDir, 'browser', 'browserContextFactory'));
 const mcpServer = require(path.join(playwrightMcpDir, 'sdk', 'server'));
 
-const { ParrotBackend } = require('./src/parrot-backend');
+const { AmiBackend } = require('./src/ami-backend');
 const packageJSON = require('./package.json');
 
 async function createConnection(userConfig = {}, contextGetter) {
@@ -42,9 +42,9 @@ async function createConnection(userConfig = {}, contextGetter) {
     factory = contextFactory(config);
   }
   return mcpServer.createServer(
-    'Parrot Browser',
+    'Ami Browser',
     packageJSON.version,
-    new ParrotBackend(config, factory),
+    new AmiBackend(config, factory),
     false
   );
 }

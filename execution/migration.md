@@ -9,7 +9,7 @@
     pyproject.toml
   jarvisicito/         ← your folder (client + your logic)
     execution/
-      audio_jarvis.py
+      audio_ami.py
       db.py
       TkVisualizer.py
       overlay.js
@@ -38,7 +38,7 @@ Claude Desktop will auto-spawn it. Your folder stays separate.
 
 ## Option 2: Connect Programmatically (recommended)
 
-In `audio_jarvis.py`, point `StdioServerParameters` at the friend's folder:
+In `audio_ami.py`, point `StdioServerParameters` at the friend's folder:
 
 ```python
 from mcp import ClientSession, StdioServerParameters

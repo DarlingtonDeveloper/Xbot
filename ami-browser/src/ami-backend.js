@@ -8,7 +8,7 @@ const { z } = require('playwright-core/lib/mcpBundle');
 const { ActionStore, extractDomain } = require('./action-store');
 const { translateAction } = require('./action-translator');
 const {
-  parrotExecuteSchema,
+  amiExecuteSchema,
   browserFallbackSchema,
   addCreateConfigSchema,
   addToolSchema,
@@ -25,7 +25,7 @@ const READ_ONLY_FALLBACK_TOOLS = new Set([
   'browser_take_screenshot',
 ]);
 
-class ParrotBackend {
+class AmiBackend {
   constructor(config, browserContextFactory) {
     this._inner = new BrowserServerBackend(config, browserContextFactory, { allTools: true });
     this._store = new ActionStore();
@@ -98,7 +98,7 @@ class ParrotBackend {
       navigateSchema,
       snapshotSchema,
       browserFallbackSchema,
-      parrotExecuteSchema,
+      amiExecuteSchema,
       addCreateConfigSchema,
       addToolSchema,
       addUpdateToolSchema,
@@ -114,7 +114,7 @@ class ParrotBackend {
         return this._handleSnapshot(rawArguments, progress);
       case 'browser_fallback':
         return this._handleFallback(rawArguments, progress);
-      case 'parrot_execute':
+      case 'ami_execute':
         return this._handleExecute(rawArguments, progress);
       case 'add_create-config':
         return this._handleCreateConfig(rawArguments);
@@ -185,7 +185,7 @@ class ParrotBackend {
 ${toolList}
 </available-tools>
 <navigation-reminder>
-You have saved tools for ${domain}. Use parrot_execute to run them.
+You have saved tools for ${domain}. Use ami_execute to run them.
 If you need browser_fallback for something not yet saved, you MUST save a complete tool with add_tool before you are done. This includes resultSelector for data extraction.
 </navigation-reminder>\n\n`;
       return prependTextToResult(result, extra);
@@ -231,7 +231,7 @@ Any use of browser_fallback requires saving a complete tool before you are done:
         nudgePrefix += `<tools-discovered domain="${this._currentDomain}">
 <context>SPA navigation detected — saved tools are available for this page.</context>
 ${toolList}
-<instruction>Use parrot_execute for these tools instead of browser_fallback.</instruction>
+<instruction>Use ami_execute for these tools instead of browser_fallback.</instruction>
 </tools-discovered>\n\n`;
       }
     }
@@ -404,7 +404,7 @@ An tool without resultSelector is INCOMPLETE.
     if (hasExistingTools) {
       const toolList = this._currentTools.map(t => t.name).join(', ');
       return `\n\n<reminder>Saved tools exist for ${domain}: ${toolList}
-Use parrot_execute instead of browser_fallback when possible.
+Use ami_execute instead of browser_fallback when possible.
 Any use of browser_fallback requires saving a complete tool before you are done.</reminder>`;
     } else if (domain) {
       return `\n\n<reminder>No saved tools for ${domain}. Any use of browser_fallback requires saving a complete tool before you are done.
@@ -415,7 +415,7 @@ After completing your task:
     return '';
   }
 
-  // ─── parrot_execute (run a saved tool) ───
+  // ─── ami_execute (run a saved tool) ───
 
   async _handleExecute(args, progress) {
     const { toolName, args: toolArgs = {} } = args;
@@ -619,7 +619,7 @@ After completing your task:
       }
 
       return {
-        content: [{ type: 'text', text: `### Tool Added\n- **toolId**: ${tool.id}\n- **Name**: ${tool.name}\n- **Config**: ${config.title} (${config.domain})\n- **Has extraction**: ${isExtractionTool ? 'yes' : '**NO — incomplete**'}\n- **Params**: ${(inputSchema || []).map(p => p.name).join(', ') || 'none'}\n\nThis tool is now available via \`parrot_execute({ toolName: "${tool.name}", args: {...} })\` on ${config.domain}.${followUp}${warningText}` }],
+        content: [{ type: 'text', text: `### Tool Added\n- **toolId**: ${tool.id}\n- **Name**: ${tool.name}\n- **Config**: ${config.title} (${config.domain})\n- **Has extraction**: ${isExtractionTool ? 'yes' : '**NO — incomplete**'}\n- **Params**: ${(inputSchema || []).map(p => p.name).join(', ') || 'none'}\n\nThis tool is now available via \`ami_execute({ toolName: "${tool.name}", args: {...} })\` on ${config.domain}.${followUp}${warningText}` }],
       };
     } catch (e) {
       const errMsg = e.message || String(e);
@@ -871,4 +871,4 @@ function truncateResult(result) {
   return { ...result, content };
 }
 
-module.exports = { ParrotBackend };
+module.exports = { AmiBackend };
