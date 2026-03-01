@@ -54,6 +54,7 @@ ami/
 - [Node.js](https://nodejs.org/) >= 18
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
 - A PostgreSQL database with the [pgvector](https://github.com/pgvector/pgvector) extension
+- **macOS** recommended for the voice agent (the overlay uses AppleScript to auto-position over Chrome; on other platforms the overlay still works but won't track the browser window)
 
 ## Setup
 
@@ -78,7 +79,23 @@ Or if you use the [Supabase CLI](https://supabase.com/docs/guides/local-developm
 supabase db push
 ```
 
-### 3. Install ami-browser
+### 3. Configure environment
+
+Copy the example and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+Required variables (see `.env.example`):
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `OPENAI_API_KEY` | OpenAI API key (for the voice agent) |
+| `DATABASE_SSL` | Set to `true` to enable SSL for database connections (optional) |
+
+### 4. Install ami-browser
 
 ```bash
 cd ami-browser
@@ -86,13 +103,7 @@ npm install
 npx playwright install
 ```
 
-Create a `.env` file in `ami-browser/` with your database connection:
-
-```
-DATABASE_URL=postgresql://user:password@host:5432/database
-```
-
-### 4. Install execution
+### 5. Install execution
 
 ```bash
 cd ../execution
