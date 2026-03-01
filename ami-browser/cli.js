@@ -27,15 +27,15 @@ const { setupExitWatchdog } = require(path.join(playwrightMcpDir, 'browser', 'wa
 const { ExtensionContextFactory } = require(path.join(playwrightMcpDir, 'extension', 'extensionContextFactory'));
 const mcpServer = require(path.join(playwrightMcpDir, 'sdk', 'server'));
 
-const { ParrotBackend } = require('./src/parrot-backend');
+const { AmiBackend } = require('./src/ami-backend');
 const packageJSON = require('./package.json');
 
-const p = program.version('Version ' + packageJSON.version).name('Parrot Browser');
+const p = program.version('Version ' + packageJSON.version).name('Ami Browser');
 
 // Let decorateMCPCommand add all CLI options and the default action handler
 decorateMCPCommand(p, packageJSON.version);
 
-// Override the action handler to use ParrotBackend instead of BrowserServerBackend
+// Override the action handler to use AmiBackend instead of BrowserServerBackend
 p.action(async (options) => {
   options.sandbox = options.sandbox === true ? undefined : false;
   setupExitWatchdog();
@@ -56,10 +56,10 @@ p.action(async (options) => {
       config.browser.launchOptions.executablePath
     );
     const factory = {
-      name: 'Parrot Browser (Extension)',
-      nameInConfig: 'parrot-browser',
+      name: 'Ami Browser (Extension)',
+      nameInConfig: 'ami-browser',
       version: packageJSON.version,
-      create: () => new ParrotBackend(config, extensionContextFactory),
+      create: () => new AmiBackend(config, extensionContextFactory),
     };
     await mcpServer.start(factory, config.server);
     return;
@@ -67,10 +67,10 @@ p.action(async (options) => {
 
   const browserContextFactory = contextFactory(config);
   const factory = {
-    name: 'Parrot Browser',
-    nameInConfig: 'parrot-browser',
+    name: 'Ami Browser',
+    nameInConfig: 'ami-browser',
     version: packageJSON.version,
-    create: () => new ParrotBackend(config, browserContextFactory),
+    create: () => new AmiBackend(config, browserContextFactory),
   };
 
   await mcpServer.start(factory, config.server);

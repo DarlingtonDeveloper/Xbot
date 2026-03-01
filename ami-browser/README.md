@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./parrot_browser.png" alt="Parrot Browser" width="400" />
+  <img src="./ami_browser.png" alt="Ami Browser" width="400" />
 </p>
 
-<h1 align="center">🦜 Parrot Browser 🦜</h1>
+<h1 align="center">🦜 Ami Browser 🦜</h1>
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that provides browser automation capabilities using [Playwright](https://playwright.dev). This server enables LLMs to interact with web pages through structured accessibility snapshots.
 
@@ -15,9 +15,9 @@ Add to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "parrot-browser": {
+    "ami-browser": {
       "command": "npx",
-      "args": ["parrot-browser"]
+      "args": ["ami-browser"]
     }
   }
 }
@@ -44,7 +44,7 @@ See [`config.d.ts`](./config.d.ts) for the full configuration schema.
 ## CLI Usage
 
 ```bash
-npx parrot-browser [options]
+npx ami-browser [options]
 ```
 
 Options:

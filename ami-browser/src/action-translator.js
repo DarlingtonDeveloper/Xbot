@@ -238,7 +238,7 @@ function playwrightFieldAction(field, value) {
  */
 function getExtractMode(exec) {
   if (exec.resultExtract) return exec.resultExtract;
-  // Map Parrot's resultType to extraction mode
+  // Map Ami's resultType to extraction mode
   if (exec.resultType === 'list') return 'list';
   return 'text';
 }
