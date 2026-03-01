@@ -251,7 +251,7 @@ class ActionStore {
   }
 
   // Semantic search — returns configs + their tools ranked by embedding similarity
-  async searchConfigsByQuery(query, limit = 5) {
+  async searchConfigsByQuery(query, limit = 1) {
     const embedding = await this._embed(query);
     const embeddingStr = '[' + embedding.join(',') + ']';
 

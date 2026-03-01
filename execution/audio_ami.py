@@ -22,7 +22,7 @@ if not OPENAI_API_KEY:
     sys.exit("Error: OPENAI_API_KEY environment variable is not set. "
              "Add it to your .env file or export it in your shell.")
 
-REALTIME_MODEL = "gpt-4o-realtime-preview"
+REALTIME_MODEL = "gpt-realtime-2025-08-28"
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 
 SAMPLE_RATE = 24000
@@ -37,16 +37,30 @@ AMI_BROWSER_PATH = os.path.join(
 
 SYSTEM_PROMPT = """You are a helpful AI assistant called Ami that can browse the web using browser tools. Always respond in English only.
 
-## Tool usage rules
+## CRITICAL RULE — ALWAYS CHECK MEMORY FIRST
+Your VERY FIRST action for every user request MUST be calling ami_memory. No exceptions. Do this before anything else.
+- If ami_memory returns a matching site → browser_navigate there → ami_execute its saved tools. Done.
+- If the navigation response contains <available-tools> → you MUST use ami_execute. Do NOT use browser_fallback.
+- ONLY fall back to manual browsing if ami_memory returned NO relevant results.
+
+## Tool usage
+
+### ami_memory (CALL THIS FIRST — ALWAYS)
+Search saved sites and tools: {"query": "order food"}, {"query": "search for products"}
+
+### ami_execute (USE THIS WHEN TOOLS EXIST)
+Run a saved tool: {"toolName": "search-google", "args": {"query": "cats"}}
+NOTE: Parameters go in "args", NOT "params".
 
 ### browser_navigate
-Navigate to a URL. Example arguments: {"url": "https://example.com"}
+Navigate to a URL: {"url": "https://example.com"}
 
 ### browser_snapshot
-Take a snapshot to see page content and get element refs. Call with no arguments: {}
+See page content and get element refs. Call with no arguments: {}
 
-### browser_fallback
-Gateway to Playwright tools. Arguments to the underlying tool MUST go inside the "arguments" object.
+### browser_fallback (LAST RESORT ONLY)
+Gateway to Playwright tools. ONLY use when no saved tool exists.
+Arguments to the underlying tool MUST go inside the "arguments" object.
 Examples:
 - Click: {"tool": "browser_click", "arguments": {"ref": "e12"}}
 - Type: {"tool": "browser_type", "arguments": {"ref": "e12", "text": "hello"}}
@@ -54,25 +68,14 @@ Examples:
 - Hover: {"tool": "browser_hover", "arguments": {"ref": "e12"}}
 WRONG: {"tool": "browser_type", "ref": "e12", "text": "hello"} — ref/text must be inside "arguments"!
 
-### ami_execute
-Execute a saved tool for the current site. Parameters go in "args", NOT "params".
-Example: {"toolName": "search-google", "args": {"query": "cats"}}
-WRONG: {"toolName": "search-google", "params": {"query": "cats"}}
-
-### ami_memory
-Search your memory of saved sites and tools by natural language query.
-Example: {"query": "order food"}, {"query": "book a flight"}, {"query": "search for products"}
-Returns matching sites with their descriptions and available tools.
-
 ## Workflow
-1. **When the user expresses an intent** (e.g. "order me a pizza", "find cheap flights", "check the news") but does NOT name a specific URL, you MUST call ami_memory first to check if a relevant site/tool is already saved. Never skip this step — go straight to memory before trying to navigate or search.
-2. If ami_memory returns results, use browser_navigate to go to the best match, then ami_execute to run its saved tools.
-3. Only if ami_memory returns no results should you fall back to navigating manually (e.g. Google search).
-4. Use browser_snapshot to see what's on the page and get element refs
-5. Use browser_fallback or ami_execute to interact with elements
-6. Always take a snapshot after actions to see the result
+1. User says something → call ami_memory with their intent
+2. ami_memory returns results → browser_navigate to the best match → ami_execute its tools
+3. ami_memory returns nothing → navigate manually, use browser_fallback
+4. Use browser_snapshot to see page content after actions
+5. If you used browser_fallback, save the workflow as a tool before finishing
 
-## Important: Tool creation ordering
+## Tool creation ordering
 When no saved tools exist for a site, ALWAYS complete the user's task first using browser_fallback.
 Only create configs and tools (add_create-config, add_tool) AFTER you have finished the action and verified the result with a snapshot."""
 
@@ -81,12 +84,8 @@ VERBOSE = True
 
 current_text = [""]
 current_action = [""]
-current_thinking = [False]
 viz_ref = [None]
 state_lock = threading.Lock()
-
-THINKING_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-thinking_frame = [0]
 browser_ready = threading.Event()
 
 
@@ -158,14 +157,9 @@ def run_overlay():
         with state_lock:
             text = current_text[0]
             action = current_action[0]
-            thinking = current_thinking[0]
         speech_label.configure(text=text)
         if VERBOSE and action:
             action_label.configure(text=f" -> {{{action}}}", text_color="white")
-        elif thinking:
-            spinner = THINKING_FRAMES[thinking_frame[0] % len(THINKING_FRAMES)]
-            action_label.configure(text=f" {spinner} thinking", text_color="#a78bfa")
-            thinking_frame[0] += 1
         else:
             action_label.configure(text="")
         root.after(50, update_text)
@@ -237,14 +231,11 @@ async def audio_receiver(ws, mcp_session: ClientSession):
                 with state_lock:
                     current_text[0] = transcript
                     current_action[0] = ""
-                    current_thinking[0] = True
 
         elif event_type == "response.audio_transcript.done":
             transcript = event.get("transcript", "").strip()
             if transcript:
                 print(f"\nAssistant: {transcript}")
-                with state_lock:
-                    current_thinking[0] = False
 
         # --- Function calling ---
         elif event_type == "response.function_call_arguments.delta":
@@ -270,7 +261,6 @@ async def audio_receiver(ws, mcp_session: ClientSession):
             print(f"\n  [Tool: {name}]")
             with state_lock:
                 current_action[0] = name
-                current_thinking[0] = False
 
             try:
                 tool_args = json.loads(arguments_str) if arguments_str else {}
@@ -314,16 +304,10 @@ async def audio_receiver(ws, mcp_session: ClientSession):
             await ws.send(json.dumps({"type": "response.create"}))
             with state_lock:
                 current_action[0] = ""
-                current_thinking[0] = True
 
         elif event_type == "response.done":
             with state_lock:
-                current_thinking[0] = False
                 current_action[0] = ""
-
-        elif event_type == "response.text.delta":
-            with state_lock:
-                current_thinking[0] = False
 
         elif event_type == "error":
             err = event.get("error", {})

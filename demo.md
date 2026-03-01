@@ -12,7 +12,9 @@
 
 **[Speaker, camera on face or slide]**
 
-> "Imagine you can't move your hands. You can't scroll, click, or type. For millions of people around the world living with paralysis or muscular disease, the internet, the most powerful tool ever built, is locked behind a mouse and keyboard."
+Imagine you can't move your hands. You can't scroll, click, or type.     
+
+For millions of people around the world living with paralysis or muscular disease, the internet, the most powerful tool ever built, is locked behind a mouse and keyboard.
 
 **[Cut to screen showing Ami overlay on Chrome]**
 
