@@ -136,22 +136,6 @@ Point your MCP client to the local CLI entry point using `node`:
 
 Replace `/absolute/path/to/ami` with the actual path on your machine.
 
-You can also pass options after `cli.js`:
-
-```json
-{
-  "mcpServers": {
-    "ami-browser": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/ami/ami-browser/cli.js",
-        "--headless"
-      ]
-    }
-  }
-}
-```
-
 Available CLI options:
 
 - `--browser <browser>` — Browser to use (`chrome`, `firefox`, `webkit`, `chromium`, `msedge`)
