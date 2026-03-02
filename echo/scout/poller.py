@@ -29,12 +29,14 @@ class ScoutPoller:
         watchlist_url: str,
         keywords: list[str],
         anti_signals: list[str] | None = None,
+        niche_embedding: list[float] | None = None,
     ):
         self.pool = pool
         self.xbot = xbot
         self.watchlist_url = watchlist_url
         self.keyword_rotator = KeywordRotator(keywords)
         self.anti_signals = anti_signals
+        self.niche_embedding = niche_embedding
         self._running = False
 
     async def run(self) -> None:
@@ -94,6 +96,15 @@ class ScoutPoller:
 
         # 8. Re-scrape metrics for pending tweets (velocity calculation)
         await self._rescrape_pending_tweets()
+
+        # 9. Score all queued tweets
+        try:
+            from echo.scorer.pipeline import score_tweets
+
+            scored = await score_tweets(niche_embedding=self.niche_embedding)
+            log.info("Scored %d queued tweets", scored)
+        except Exception:
+            log.exception("Error scoring tweets")
 
     async def _fetch_list_tweets(self) -> list[RawTweet]:
         try:
