@@ -62,6 +62,6 @@ async def maybe_evolve_voice(
             f"Auto-evolved: avg score {analysis.avg_engagement_score:.2f} "
             f"vs 30d avg {thirty_day_avg:.2f}"
         ),
-        tweet_corpus_size=len(top_texts) + len(poor_texts),
+        tweet_corpus_size=len(all_dicts),
     )
     return True
