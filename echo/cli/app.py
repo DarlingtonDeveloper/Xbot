@@ -5,7 +5,7 @@ from typing import Optional
 
 from rich.console import Console
 
-from echo.cli.commands import handle_history, handle_status
+from echo.cli.commands import handle_digest, handle_history, handle_status
 from echo.cli.editor import open_in_editor
 from echo.cli.rendering import render_replies, render_tweet, render_waiting
 from echo.db.database import Database
@@ -123,11 +123,15 @@ class EchoCLI:
             await handle_history(self.console, self.db)
             return "continue"
 
+        if action == "digest":
+            await handle_digest(self.console, self.db)
+            return "continue"
+
         if action == "refresh":
             self.console.print("[cyan]Refreshing...[/]")
             return "next"
 
-        self.console.print("[red]Unknown command. Use 1-5, e<N>, s, q, status, history.[/]")
+        self.console.print("[red]Unknown command. Use 1-5, e<N>, s, q, status, history, digest.[/]")
         return "continue"
 
     async def _handle_edit(self, action: str, candidate: Candidate) -> str:

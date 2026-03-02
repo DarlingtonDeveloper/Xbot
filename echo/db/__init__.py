@@ -1,12 +1,19 @@
 from echo.db.database import Database
-from echo.db.models import Tweet, Reply, GeneratedReply, Candidate, SessionStats, PostedReply
+from echo.db.models import (
+    Candidate,
+    DailyDigest,
+    GeneratedReply,
+    PostedReply,
+    SessionStats,
+    Tweet,
+)
 
 __all__ = [
     "Database",
-    "Tweet",
-    "Reply",
-    "GeneratedReply",
     "Candidate",
-    "SessionStats",
+    "DailyDigest",
+    "GeneratedReply",
     "PostedReply",
+    "SessionStats",
+    "Tweet",
 ]

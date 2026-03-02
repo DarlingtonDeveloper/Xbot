@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from echo.db.models import Candidate, GeneratedReply, PostedReply, SessionStats
+from echo.db.models import Candidate, DailyDigest, GeneratedReply, PostedReply, SessionStats
 
 TIER_EMOJI = {"red": "🔴", "yellow": "🟡", "green": "🟢"}
 
@@ -47,17 +48,19 @@ def format_age(dt: datetime) -> str:
 
 def render_tweet(console: Console, candidate: Candidate) -> None:
     tweet = candidate.tweet
-    tier = get_tier(tweet.virality_score)
+    score = tweet.virality_score or 0
+    tier = get_tier(score)
     emoji = TIER_EMOJI[tier]
 
-    header = f"{emoji} ECHO — New candidate (score: {tweet.virality_score:.0f})"
+    header = f"{emoji} ECHO — New candidate (score: {score:.0f})"
 
-    author_line = f"@{tweet.author_handle} ({tweet.author_followers:,} followers"
+    followers = f"{tweet.author_followers:,}" if tweet.author_followers else "?"
+    author_line = f"@{tweet.author_handle} ({followers} followers"
     if tweet.author_verified:
         author_line += ", ✓ verified"
     author_line += ")"
 
-    age = format_age(tweet.tweet_created_at)
+    age = format_age(tweet.tweet_created_at) if tweet.tweet_created_at else "unknown"
     metrics = (
         f"📊 {tweet.likes_t0} likes · "
         f"{tweet.replies_t0} replies · "
@@ -106,7 +109,7 @@ def render_history(console: Console, replies: list[PostedReply]) -> None:
         return
 
     for r in replies:
-        age = format_age(r.posted_at)
+        age = format_age(r.posted_at) if r.posted_at else "just now"
         impressions = str(r.impressions) if r.impressions is not None else "..."
         likes = str(r.likes) if r.likes is not None else "..."
         console.print(
@@ -114,6 +117,34 @@ def render_history(console: Console, replies: list[PostedReply]) -> None:
             f'  "{r.reply_text[:80]}{"..." if len(r.reply_text) > 80 else ""}"\n'
             f"  👁 {impressions} · ❤️ {likes}\n"
         )
+
+
+def render_digest(console: Console, digest: Optional[DailyDigest]) -> None:
+    if digest is None:
+        console.print("[dim]No digest available yet.[/]")
+        return
+
+    table = Table(title=f"Daily Digest — {digest.date}")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="bold")
+    if digest.tweets_discovered is not None:
+        table.add_row("Tweets discovered", str(digest.tweets_discovered))
+    if digest.replies_posted is not None:
+        table.add_row("Replies posted", str(digest.replies_posted))
+    if digest.avg_impressions is not None:
+        table.add_row("Avg impressions", f"{digest.avg_impressions:.0f}")
+    if digest.follower_delta is not None:
+        table.add_row("Follower delta", f"+{digest.follower_delta}")
+    console.print(table)
+
+    if digest.strategy_breakdown:
+        console.print("\n[bold]Strategy breakdown:[/]")
+        for strategy, data in digest.strategy_breakdown.items():
+            icon = STRATEGY_ICONS.get(strategy, "💬")
+            console.print(f"  {icon} {strategy}: {data}")
+
+    if digest.recommendations:
+        console.print(f"\n[bold]Recommendations:[/]\n{digest.recommendations}")
 
 
 def render_waiting(console: Console, queue_depth: int, stats: SessionStats) -> None:

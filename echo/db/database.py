@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
 
+from echo.config import get_database_url
 from echo.db.models import (
     Candidate,
-    GeneratedReply,
+    DailyDigest,
     PostedReply,
     SessionStats,
     Tweet,
 )
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-
 
 class Database:
     def __init__(self, database_url: Optional[str] = None):
-        self._url = database_url or DATABASE_URL
+        self._url = database_url or get_database_url()
         self._pool: Optional[asyncpg.Pool] = None
 
     async def connect(self) -> None:
@@ -34,17 +32,18 @@ class Database:
     # ------------------------------------------------------------------
 
     async def get_next_candidate(self) -> Optional[Candidate]:
-        """Return the highest-scoring queued tweet with its generated replies."""
+        """Return the highest-scoring queued tweet."""
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT tweet_id, author_handle, author_followers, author_verified,
-                       content, likes_t0, replies_t0, retweets_t0, virality_score,
+                SELECT tweet_id, tweet_url, author_handle, author_name,
+                       content, author_followers, author_verified,
+                       likes_t0, replies_t0, retweets_t0, virality_score,
                        status, tweet_created_at, discovered_at
                 FROM echo.tweets
                 WHERE status = 'queued'
-                ORDER BY virality_score DESC
+                ORDER BY virality_score DESC NULLS LAST
                 LIMIT 1
                 """
             )
@@ -52,18 +51,7 @@ class Database:
                 return None
 
             tweet = Tweet(**dict(row))
-
-            reply_rows = await conn.fetch(
-                """
-                SELECT slot, strategy, text
-                FROM echo.generated_replies
-                WHERE tweet_id = $1
-                ORDER BY slot
-                """,
-                tweet.tweet_id,
-            )
-            replies = [GeneratedReply(**dict(r)) for r in reply_rows]
-            return Candidate(tweet=tweet, generated_replies=replies)
+            return Candidate(tweet=tweet)
 
     async def get_queue_depth(self) -> int:
         assert self._pool is not None
@@ -86,9 +74,9 @@ class Database:
                     "UPDATE echo.tweets SET status = $1, presented_at = $2 WHERE tweet_id = $3",
                     status, now, tweet_id,
                 )
-            elif status in ("replied", "skipped"):
+            elif status == "replied":
                 await conn.execute(
-                    "UPDATE echo.tweets SET status = $1, resolved_at = $2 WHERE tweet_id = $3",
+                    "UPDATE echo.tweets SET status = $1, replied_at = $2 WHERE tweet_id = $3",
                     status, now, tweet_id,
                 )
             else:
@@ -110,17 +98,19 @@ class Database:
         original_text: Optional[str] = None,
     ) -> str:
         assert self._pool is not None
+        now = datetime.now(timezone.utc)
         async with self._pool.acquire() as conn:
-            reply_id = await conn.fetchval(
+            row_id = await conn.fetchval(
                 """
-                INSERT INTO echo.replies (tweet_id, reply_text, strategy, was_edited, original_text)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING reply_id
+                INSERT INTO echo.replies
+                    (tweet_id, reply_text, strategy, was_edited, original_text, posted_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
                 """,
-                tweet_id, reply_text, strategy, was_edited, original_text,
+                tweet_id, reply_text, strategy, was_edited, original_text, now,
             )
             await self.update_status(tweet_id, "replied")
-            return str(reply_id)
+            return str(row_id)
 
     # ------------------------------------------------------------------
     # Stats & history
@@ -133,9 +123,9 @@ class Database:
                 """
                 SELECT
                     (SELECT COUNT(*) FROM echo.tweets WHERE status = 'queued') AS queue_depth,
-                    (SELECT COUNT(*) FROM echo.replies WHERE DATE(posted_at) = CURRENT_DATE) AS posted_today,
-                    (SELECT AVG(virality_score) FROM echo.tweets WHERE DATE(discovered_at) = CURRENT_DATE) AS avg_score,
-                    (SELECT COALESCE(SUM(follower_delta), 0) FROM echo.replies WHERE DATE(posted_at) = CURRENT_DATE) AS follower_delta
+                    (SELECT COUNT(*) FROM echo.replies WHERE posted_at::date = CURRENT_DATE) AS posted_today,
+                    (SELECT AVG(virality_score) FROM echo.tweets WHERE discovered_at::date = CURRENT_DATE) AS avg_score,
+                    (SELECT COALESCE(SUM(follower_delta), 0) FROM echo.replies WHERE posted_at::date = CURRENT_DATE) AS follower_delta
                 """
             )
             return SessionStats(
@@ -154,8 +144,31 @@ class Database:
                        r.posted_at, t.author_handle
                 FROM echo.replies r
                 JOIN echo.tweets t ON r.tweet_id = t.tweet_id
-                WHERE DATE(r.posted_at) = CURRENT_DATE
+                WHERE r.posted_at::date = CURRENT_DATE
                 ORDER BY r.posted_at DESC
                 """
             )
             return [PostedReply(**dict(r)) for r in rows]
+
+    async def get_latest_digest(self) -> Optional[DailyDigest]:
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT date, tweets_discovered, replies_posted,
+                       avg_impressions, follower_delta, strategy_breakdown,
+                       recommendations
+                FROM echo.daily_digests
+                ORDER BY date DESC
+                LIMIT 1
+                """
+            )
+            if row is None:
+                return None
+            data = dict(row)
+            # strategy_breakdown is JSONB, asyncpg returns it as a string or dict
+            import json
+            sb = data["strategy_breakdown"]
+            if isinstance(sb, str):
+                data["strategy_breakdown"] = json.loads(sb)
+            return DailyDigest(**data)
