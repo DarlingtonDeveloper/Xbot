@@ -24,7 +24,7 @@ test-results/
 playwright-report/
 
 # Generated test certificates
-ami-browser/tests/testserver/*.pem
+xbot-browser/tests/testserver/*.pem
 
 # Browser sessions
 sessions/
