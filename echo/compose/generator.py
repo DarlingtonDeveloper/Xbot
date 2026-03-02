@@ -133,8 +133,8 @@ async def call_compose_llm(
         winning_patterns=winning_patterns,
     )
 
-    client = anthropic.Anthropic()
-    message = client.messages.create(
+    client = anthropic.AsyncAnthropic()
+    message = await client.messages.create(
         model=COMPOSE_MODEL,
         max_tokens=2048,
         messages=[{"role": "user", "content": prompt}],

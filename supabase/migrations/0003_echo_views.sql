@@ -34,7 +34,6 @@ CREATE VIEW echo.daily_performance AS
 SELECT DATE(posted_at) as day,
        COUNT(*) as replies,
        AVG(impressions) as avg_impressions,
-       SUM(follower_delta) as net_followers,
        AVG(time_to_reply_seconds) as avg_response_time
 FROM echo.replies
 WHERE posted_at IS NOT NULL
