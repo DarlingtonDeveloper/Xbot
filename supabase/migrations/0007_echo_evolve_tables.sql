@@ -28,10 +28,6 @@ CREATE TABLE IF NOT EXISTS echo.daily_digests (
 
 CREATE INDEX idx_daily_digests_date ON echo.daily_digests (date DESC);
 
--- Add strategy column to replies if missing (for existing data)
-ALTER TABLE echo.replies
-    ADD COLUMN IF NOT EXISTS strategy text;
-
 -- RLS
 ALTER TABLE echo.strategy_scores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE echo.daily_digests ENABLE ROW LEVEL SECURITY;

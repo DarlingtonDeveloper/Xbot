@@ -10,10 +10,6 @@ ALTER TABLE "configs" ADD COLUMN "embedding" vector(384);
 DROP INDEX IF EXISTS "idx_configs_embedding";
 CREATE INDEX "idx_configs_embedding" ON "configs" USING hnsw ("embedding" vector_cosine_ops);
 
--- Change embedding dimension on echo.tweets table
-ALTER TABLE echo.tweets DROP COLUMN "content_embedding";
-ALTER TABLE echo.tweets ADD COLUMN "content_embedding" vector(384);
-
 -- Add selector resilience columns to tools table
 ALTER TABLE "tools"
   ADD COLUMN "last_verified" timestamp with time zone,

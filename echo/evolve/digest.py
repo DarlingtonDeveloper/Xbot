@@ -71,8 +71,8 @@ async def generate_digest(analysis: AnalysisResult) -> dict:
         poor_performers_formatted=_format_replies(analysis.poor_performers),
     )
 
-    client = anthropic.Anthropic()
-    message = client.messages.create(
+    client = anthropic.AsyncAnthropic()
+    message = await client.messages.create(
         model=DIGEST_MODEL,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
