@@ -4,15 +4,15 @@ const { z } = require('playwright-core/lib/mcpBundle');
 
 // ─── Core Tools ───
 
-const amiExecuteSchema = {
-  name: 'ami_execute',
+const xbotExecuteSchema = {
+  name: 'xbot_execute',
   title: 'Execute a saved tool',
   description: `Execute a pre-configured tool for the current site.
 <usage-rules>
 - After navigating to a site, the response tells you which tools exist.
 - Call this with the toolName and arguments to execute them.
 - These are saved shortcuts that use CSS selectors instead of raw Playwright calls.
-- ALWAYS prefer ami_execute over browser_fallback when a saved tool exists for your task.
+- ALWAYS prefer xbot_execute over browser_fallback when a saved tool exists for your task.
 </usage-rules>`,
   inputSchema: z.object({
     toolName: z.string().describe('The tool name to execute (e.g., "search-products")'),
@@ -32,7 +32,7 @@ const browserFallbackSchema = {
 This is your escape hatch when saved tools don't cover what you need.
 <workflow>
 1. First check if saved tools exist after browser_navigate.
-2. If a saved tool exists, use ami_execute instead.
+2. If a saved tool exists, use xbot_execute instead.
 3. If no saved tool exists, use this tool to complete the task.
 4. After completing the task with fallback tools, ALWAYS save the workflow using add_tool.
 </workflow>
@@ -60,6 +60,18 @@ WRONG: { "searchText": {...} }                — no such parameter exists
     arguments: z.record(z.string(), z.unknown()).optional().describe('Arguments for the tool'),
   }),
   type: 'action',
+};
+
+// ─── X (Twitter) Tools ───
+
+const xCheckSessionSchema = {
+  name: 'x:check-session',
+  title: 'Check X session',
+  description: `Check if the current browser session is authenticated on X (Twitter).
+Navigates to x.com/home and detects whether the user is logged in or redirected to a login page.
+Returns { authenticated: boolean, url: string, title: string }.`,
+  inputSchema: z.object({}),
+  type: 'readOnly',
 };
 
 // ─── Contribution Tools ───
@@ -170,8 +182,8 @@ Provide the tool name and only the fields you want to update. Uses the current d
   type: 'action',
 };
 
-const amiMemorySearchSchema = {
-  name: 'ami_memory',
+const xbotMemorySearchSchema = {
+  name: 'xbot_memory',
   title: 'Search memory for saved sites and tools',
   description: `Search your memory of previously visited sites and saved tools by natural language query.
 <usage-rules>
@@ -198,9 +210,10 @@ const addDeleteToolSchema = {
 };
 
 module.exports = {
-  amiExecuteSchema,
+  xbotExecuteSchema,
   browserFallbackSchema,
-  amiMemorySearchSchema,
+  xbotMemorySearchSchema,
+  xCheckSessionSchema,
   addCreateConfigSchema,
   addToolSchema,
   addUpdateToolSchema,

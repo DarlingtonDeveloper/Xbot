@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolveDelays, hasDelays, generateDelayCode, generateScrollCode } = require('./browser/anti-detection');
+
 // --- Playwright selector detection ---
 
 /**
@@ -195,7 +197,7 @@ function domFieldAction(field, value) {
  * Generate Playwright API lines for filling a field.
  * Returns an array of code lines (each is a standalone statement).
  */
-function playwrightFieldAction(field, value) {
+function playwrightFieldAction(field, value, delays) {
   const locator = selectorToLocator(field.selector);
   const type = field.type || 'fill';
 
@@ -226,6 +228,9 @@ function playwrightFieldAction(field, value) {
       return [`  await ${locator}.first().click();`];
 
     default: // fill, text, textarea, number, date
+      if (delays && delays.typing > 0) {
+        return [`  await ${locator}.first().pressSequentially(${qs(String(value))}, { delay: ${delays.typing} });`];
+      }
       return [`  await ${locator}.first().fill(${qs(String(value))});`];
   }
 }
@@ -373,6 +378,26 @@ function translateAction(action, args) {
   const lines = [];
   const batch = []; // Accumulate CSS DOM operations for batching
 
+  // Resolve anti-detection delays
+  const delays = resolveDelays(exec.delays);
+  const useDelays = hasDelays(delays);
+
+  // Inject delay helper if needed
+  if (useDelays) {
+    const delayCode = generateDelayCode(delays);
+    if (delayCode) lines.push(delayCode);
+  }
+
+  // Build a map of afterField scrolls for quick lookup
+  const afterFieldScrolls = {};
+  if (exec.scrolls) {
+    for (const scroll of exec.scrolls) {
+      if (scroll.afterField) {
+        afterFieldScrolls[scroll.afterField] = scroll;
+      }
+    }
+  }
+
   function flushBatch() {
     if (batch.length > 0) {
       lines.push(`  await page.evaluate(() => {`);
@@ -392,16 +417,36 @@ function translateAction(action, args) {
     const resolved = value !== undefined ? value : field.defaultValue;
     if (resolved === undefined || resolved === null) continue;
 
+    // Before-action delay
+    if (useDelays && delays.beforeAction > 0) {
+      flushBatch();
+      lines.push(`  await _delay(${delays.beforeAction});`);
+    }
+
     const cssSel = selectorToCss(field.selector);
     const needsPlaywright = !cssSel || isNativeFillType(field.type);
 
     if (needsPlaywright) {
       // Flush any pending batch before Playwright operations
       flushBatch();
-      lines.push(...playwrightFieldAction(field, resolved));
+      lines.push(...playwrightFieldAction(field, resolved, delays));
     } else {
       // Accumulate into batch
       batch.push(...domFieldAction(field, resolved));
+    }
+
+    // After-action delay
+    if (useDelays && delays.afterAction > 0) {
+      flushBatch();
+      lines.push(`  await _delay(${delays.afterAction});`);
+    }
+
+    // After-field scroll
+    const fieldName = paramName || field.name || field.param;
+    if (fieldName && afterFieldScrolls[fieldName]) {
+      flushBatch();
+      const scrollCode = generateScrollCode(afterFieldScrolls[fieldName], delays);
+      if (scrollCode) lines.push(scrollCode);
     }
   }
 
@@ -455,6 +500,16 @@ function translateAction(action, args) {
   // Flush any remaining batch
   flushBatch();
 
+  // After-submit scrolls
+  if (exec.scrolls) {
+    for (const scroll of exec.scrolls) {
+      if (scroll.afterSubmit) {
+        const scrollCode = generateScrollCode(scroll, delays);
+        if (scrollCode) lines.push(scrollCode);
+      }
+    }
+  }
+
   // Phase 2: Wait for results
   if (exec.resultDelay) {
     lines.push(`  await new Promise(r => setTimeout(r, ${exec.resultDelay}));`);
@@ -491,6 +546,24 @@ function translateAction(action, args) {
     }
   } else {
     lines.push(`  return { success: true };`);
+  }
+
+  // Phase 4: Verify selector (post-execution check)
+  if (exec.verifySelector) {
+    // Insert verify before the final return — wrap the extraction result
+    const lastReturnIdx = lines.length - 1;
+    const lastLine = lines[lastReturnIdx];
+    if (lastLine && lastLine.trim().startsWith('return ')) {
+      // Replace final return with a verification block
+      lines.splice(lastReturnIdx, 1,
+        `  const _verifyEl = await page.locator(${qs(exec.verifySelector)}).first().isVisible().catch(() => false);`,
+        `  if (!_verifyEl) return { error: 'Verification failed: element not found', selector: ${qs(exec.verifySelector)} };`,
+        lastLine
+      );
+    } else {
+      lines.push(`  const _verifyEl = await page.locator(${qs(exec.verifySelector)}).first().isVisible().catch(() => false);`);
+      lines.push(`  if (!_verifyEl) return { error: 'Verification failed: element not found', selector: ${qs(exec.verifySelector)} };`);
+    }
   }
 
   return `async (page) => {\n${lines.join('\n')}\n}`;

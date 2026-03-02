@@ -1,19 +1,20 @@
 {
-  "name": "ami-browser",
+  "name": "xbot-browser",
   "version": "0.0.68",
-  "description": "Ami Browser - MCP server for browser automation via Playwright",
+  "description": "Xbot Browser - MCP server for browser automation via Playwright",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/felofix/ami.git"
+    "url": "git+https://github.com/DarlingtonDeveloper/Xbot.git"
   },
   "engines": {
     "node": ">=18"
   },
-  "author": "Ami contributors",
+  "author": "Xbot contributors",
   "license": "Apache-2.0",
   "scripts": {
     "test": "playwright test",
-    "ctest": "playwright test --project=chrome"
+    "ctest": "playwright test --project=chrome",
+    "train:x": "node scripts/train-x-tools.js"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -23,7 +24,7 @@
     }
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1000.0",
+    "@huggingface/transformers": "^3.8.1",
     "pg": "^8.19.0",
     "playwright": "1.59.0-alpha-1771104257000",
     "playwright-core": "1.59.0-alpha-1771104257000"
@@ -34,6 +35,6 @@
     "@types/node": "^24.3.0"
   },
   "bin": {
-    "ami-browser": "cli.js"
+    "xbot-browser": "cli.js"
   }
 }

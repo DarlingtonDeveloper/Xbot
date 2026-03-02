@@ -1,7 +1,6 @@
 'use strict';
 
 const { Pool } = require('pg');
-const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const path = require('path');
 
 // Load .env from project root
@@ -30,30 +29,18 @@ class ActionStore {
       poolConfig.ssl = { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
 
     this._pool = new Pool(poolConfig);
-
-    this._bedrock = new BedrockRuntimeClient({
-      region: process.env.AWS_DEFAULT_REGION,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        sessionToken: process.env.AWS_SESSION_TOKEN,
-      },
-    });
+    this._embedder = null; // Lazy-loaded local embedding pipeline
   }
 
-  // ─── Embedding ───
+  // ─── Embedding (local, via @huggingface/transformers) ───
 
   async _embed(text) {
-    const body = JSON.stringify({ inputText: text });
-    const command = new InvokeModelCommand({
-      modelId: 'amazon.titan-embed-text-v1',
-      body,
-      contentType: 'application/json',
-      accept: '*/*',
-    });
-    const response = await this._bedrock.send(command);
-    const result = JSON.parse(new TextDecoder().decode(response.body));
-    return result.embedding;
+    if (!this._embedder) {
+      const { pipeline } = await import('@huggingface/transformers');
+      this._embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    }
+    const output = await this._embedder(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
   }
 
   // ─── Config CRUD ───
@@ -127,8 +114,8 @@ class ActionStore {
 
   async addTool({ configId, name, description, inputSchema, execution }) {
     const res = await this._pool.query(
-      `INSERT INTO tools (config_id, name, description, input_schema, execution)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO tools (config_id, name, description, input_schema, execution, last_verified)
+       VALUES ($1, $2, $3, $4, $5, now())
        RETURNING *`,
       [configId, name, description || '', JSON.stringify(inputSchema || {}), JSON.stringify(execution || {})]
     );
@@ -173,11 +160,20 @@ class ActionStore {
     const values = [];
     let idx = 1;
 
+    const colMap = {
+      inputSchema: 'input_schema',
+      configId: 'config_id',
+      lastVerified: 'last_verified',
+      failureCount: 'failure_count',
+      fallbackSelectors: 'fallback_selectors',
+    };
+
     for (const [key, val] of Object.entries(updates)) {
       if (val === undefined) continue;
-      const col = key === 'inputSchema' ? 'input_schema' : key === 'configId' ? 'config_id' : key;
+      const col = colMap[key] || key;
       fields.push(`"${col}" = $${idx}`);
-      values.push((col === 'input_schema' || col === 'execution') ? JSON.stringify(val) : val);
+      const jsonCols = ['input_schema', 'execution', 'fallback_selectors'];
+      values.push(jsonCols.includes(col) ? JSON.stringify(val) : val);
       idx++;
     }
     if (fields.length === 0) return null;
@@ -197,14 +193,31 @@ class ActionStore {
     return res.rowCount > 0;
   }
 
+  // ─── Failure tracking ───
+
+  async incrementFailureCount(toolId) {
+    const res = await this._pool.query(
+      `UPDATE tools SET failure_count = failure_count + 1, updated_at = now()
+       WHERE id = $1 RETURNING failure_count`,
+      [toolId]
+    );
+    return res.rows[0]?.failure_count || 0;
+  }
+
+  async resetFailureCount(toolId) {
+    await this._pool.query(
+      `UPDATE tools SET failure_count = 0, last_verified = now(), updated_at = now()
+       WHERE id = $1`,
+      [toolId]
+    );
+  }
+
   // ─── Lookup helpers ───
 
-  // Find all tools matching a domain + URL path
   async findToolsForUrl(domain, url) {
     const configs = await this.getConfigsForDomain(domain);
     if (configs.length === 0) return [];
 
-    // Filter configs whose url_pattern matches the URL path
     let pathname;
     try {
       const parsed = new URL(url);
@@ -219,7 +232,6 @@ class ActionStore {
     const configIds = matchingConfigs.map(c => c.id);
     const placeholders = configIds.map((_, i) => `$${i + 1}`).join(',');
 
-    // Increment visit_count for all matching configs
     await this._pool.query(
       `UPDATE configs SET visit_count = visit_count + 1, updated_at = now()
        WHERE id IN (${placeholders})`,
@@ -237,7 +249,6 @@ class ActionStore {
     return res.rows;
   }
 
-  // Find a tool by name across all configs for a domain
   async findToolByNameForDomain(domain, toolName) {
     const res = await this._pool.query(
       `SELECT t.*, c.domain, c.url_pattern
@@ -250,7 +261,6 @@ class ActionStore {
     return res.rows[0] || null;
   }
 
-  // Semantic search — returns configs + their tools ranked by embedding similarity
   async searchConfigsByQuery(query, limit = 1) {
     const embedding = await this._embed(query);
     const embeddingStr = '[' + embedding.join(',') + ']';
@@ -263,7 +273,6 @@ class ActionStore {
       [embeddingStr, limit]
     );
 
-    // For each config, fetch its tools
     const configs = [];
     for (const row of res.rows) {
       const toolsRes = await this._pool.query(
@@ -278,7 +287,6 @@ class ActionStore {
     return configs;
   }
 
-  // Find a tool by name across ALL configs
   async findToolByName(toolName) {
     const res = await this._pool.query(
       `SELECT t.*, c.domain, c.url_pattern
@@ -296,7 +304,6 @@ class ActionStore {
   }
 }
 
-// Glob-style URL pattern matching
 function matchUrlPattern(pattern, pathname) {
   if (pattern === '/*' || pattern === '*') return true;
   const regexStr = '^' + pattern
@@ -310,7 +317,6 @@ function matchUrlPattern(pattern, pathname) {
   }
 }
 
-// Extract domain from URL
 function extractDomain(url) {
   try {
     const parsed = new URL(url);
