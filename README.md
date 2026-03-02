@@ -1,146 +1,125 @@
-<p align="center">
-  <img src="./ami.jpg" alt="Ami" width="200" />
-</p>
+# Xbot
 
-<h1 align="center">Ami</h1>
-
-<p align="center">A voice-controlled AI agent that browses the web for you.</p>
+An MCP server for browser automation that learns and reuses procedures, built for X (Twitter) automation.
 
 ---
 
 ## How It Works
 
-### ami-browser: Smart Browser Automation
-
-ami-browser is an [MCP](https://modelcontextprotocol.io/) server that sits on top of [Playwright](https://playwright.dev) and adds a layer of **stored tools and memory**. Most things we do on the web are things we've done before: searching, adding to cart, checking out. ami-browser takes advantage of this by learning and reusing procedures.
+xbot-browser is an [MCP](https://modelcontextprotocol.io/) server built on [Playwright](https://playwright.dev) with **stored tools, memory, and anti-detection**.
 
 When you navigate to a site:
 
-1. **Known site**: ami-browser looks up the domain and URL pattern in its database. If it finds stored tools (e.g. `search-products`, `add-to-cart`), they're immediately available. The LLM calls them by name with parameters, and ami-browser translates them into Playwright actions. Fast, cheap, no page parsing needed.
+1. **Known site**: Looks up the domain and URL pattern in its database. If stored tools exist (e.g. `x:get-list-feed`, `x:post-reply`), they're immediately available. The LLM calls them by name with parameters, and xbot translates them into Playwright actions.
 
-2. **New site**: No stored tools exist yet, so ami-browser falls back to raw Playwright tools (snapshot, click, type). As the LLM explores the page, ami-browser nudges it to save what it learns as reusable tools (CSS selectors, form fields, submit actions, and result extraction) so the next visit is instant.
+2. **New site**: No stored tools exist yet, so xbot falls back to raw Playwright tools. As the LLM explores the page, xbot nudges it to save what it learns as reusable tools so the next visit is instant.
 
-This means ami-browser gets smarter over time. The first visit to a site is exploratory. Every visit after that reuses stored procedures, saving tokens, time, and money.
+## Features
 
-### execution: Voice-Driven Agent
-
-The execution module connects your voice to the browser through a real-time audio pipeline:
-
-```
-🎤 You speak
- ↓  Microphone captures PCM audio, streams to API
-🧠 OpenAI Realtime API (gpt-4o)
- ↓  Transcribes speech, reasons, decides which tools to call
-🔧 Tool calls routed to ami-browser via MCP
- ↓  ami-browser executes browser actions (stored or fallback)
-📋 Results sent back to the model
- ↓  Model synthesizes a spoken response
-🔊 You hear the answer
-```
-
-The agent uses server-side voice activity detection to know when you've finished speaking, runs any necessary browser tools, and responds in natural speech. A Tkinter overlay shows live transcription and an audio waveform on top of the browser window.
+- **Stored tool system** — Save and reuse browser automation procedures across sessions
+- **Local embeddings** — Semantic search for sites/tools via `Xenova/all-MiniLM-L6-v2` (no cloud API needed)
+- **Session persistence** — Save/load browser login state with `--session-file`
+- **Anti-detection** — Configurable delays, typing simulation, scroll behavior
+- **Selector resilience** — Fallback selectors and automatic failure tracking
+- **X (Twitter) tools** — Pre-built tools for feed reading, posting, searching, and metrics
 
 ## Project Structure
 
 ```
-ami/
-├── ami-browser/    # MCP server (Node.js)
-├── execution/      # Voice agent (Python)
-└── supabase/       # Database migrations & config
+xbot/
+├── xbot-browser/           # MCP server (Node.js)
+│   ├── src/
+│   │   ├── xbot-backend.js     # Main orchestrator
+│   │   ├── action-store.js      # DB + local embeddings
+│   │   ├── action-translator.js # Tool → Playwright code
+│   │   ├── action-tools.js      # MCP tool schemas
+│   │   ├── action-schema.js     # Validation schemas
+│   │   ├── tools/
+│   │   │   ├── registry.js      # Tool lookup logic
+│   │   │   ├── fallback.js      # Fallback/nudge logic
+│   │   │   └── x-tools.js       # X-specific handlers
+│   │   └── browser/
+│   │       ├── session.js        # Session save/load
+│   │       └── anti-detection.js # Delay helpers
+│   └── scripts/
+│       └── train-x-tools.js     # X tool training script
+└── supabase/                # Database migrations
 ```
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 18
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - A PostgreSQL database with the [pgvector](https://github.com/pgvector/pgvector) extension
-- **macOS** recommended for the voice agent (the overlay uses AppleScript to auto-position over Chrome; on other platforms the overlay still works but won't track the browser window)
 
 ## Setup
 
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/felofix/ami.git
-cd ami
+git clone https://github.com/DarlingtonDeveloper/Xbot.git
+cd Xbot
 ```
 
 ### 2. Set up the database
 
-Run the migration against your PostgreSQL database:
-
 ```bash
 psql $DATABASE_URL -f supabase/migrations/0001_init_schema.sql
-```
-
-Or if you use the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli):
-
-```bash
-supabase db push
+psql $DATABASE_URL -f supabase/migrations/0005_xbot_schema.sql
 ```
 
 ### 3. Configure environment
-
-Copy the example and fill in your values:
 
 ```bash
 cp .env.example .env
 ```
 
-Required variables (see `.env.example`):
-
 | Variable | Description |
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `OPENAI_API_KEY` | OpenAI API key (for the voice agent) |
-| `DATABASE_SSL` | Set to `true` to enable SSL for database connections (optional) |
 
-### 4. Install ami-browser
+### 4. Install xbot-browser
 
 ```bash
-cd ami-browser
+cd xbot-browser
 npm install
 npx playwright install
 ```
 
-### 5. Install execution
+### 5. Train X tools (optional)
 
 ```bash
-cd ../execution
-uv sync
+npm run train:x
 ```
 
 ## Usage
 
-### Running the voice agent
-
-```bash
-cd execution
-uv run python audio_ami.py
-```
-
-### Using ami-browser as an MCP server
-
-Point your MCP client to the local CLI entry point using `node`:
+### MCP server config
 
 ```json
 {
   "mcpServers": {
-    "ami-browser": {
+    "xbot-browser": {
       "command": "node",
-      "args": ["/absolute/path/to/ami/ami-browser/cli.js"]
+      "args": ["/absolute/path/to/Xbot/xbot-browser/cli.js"]
     }
   }
 }
 ```
 
-Replace `/absolute/path/to/ami` with the actual path on your machine.
-
-Available CLI options:
+### CLI options
 
 - `--browser <browser>` — Browser to use (`chrome`, `firefox`, `webkit`, `chromium`, `msedge`)
 - `--headless` — Run in headless mode
-- `--config <path>` — Path to configuration file
+- `--session-file <path>` — Path to session file for persistent login state
+
+### Anti-detection environment variables
+
+```bash
+XBOT_DELAY_BEFORE_ACTION=500
+XBOT_DELAY_AFTER_ACTION=300
+XBOT_DELAY_TYPING=80
+XBOT_DELAY_JITTER=200
+```
 
 ## License
 

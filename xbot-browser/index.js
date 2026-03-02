@@ -22,14 +22,13 @@ const { resolveConfig } = require(path.join(playwrightMcpDir, 'browser', 'config
 const { contextFactory } = require(path.join(playwrightMcpDir, 'browser', 'browserContextFactory'));
 const mcpServer = require(path.join(playwrightMcpDir, 'sdk', 'server'));
 
-const { AmiBackend } = require('./src/ami-backend');
+const { XbotBackend } = require('./src/xbot-backend');
 const packageJSON = require('./package.json');
 
 async function createConnection(userConfig = {}, contextGetter) {
   const config = await resolveConfig(userConfig);
   let factory;
   if (contextGetter) {
-    // Wrap the custom context getter in a simple factory
     factory = {
       name: 'custom',
       description: 'Connect to a browser using a custom context getter',
@@ -42,9 +41,9 @@ async function createConnection(userConfig = {}, contextGetter) {
     factory = contextFactory(config);
   }
   return mcpServer.createServer(
-    'Ami Browser',
+    'Xbot Browser',
     packageJSON.version,
-    new AmiBackend(config, factory),
+    new XbotBackend(config, factory),
     false
   );
 }

@@ -16,7 +16,7 @@ const selectorObjectSchema = z.object({
 });
 
 const selectorSchema = z.union([
-  z.string(), // CSS shorthand
+  z.string(),
   selectorObjectSchema,
 ]);
 
@@ -49,18 +49,34 @@ const fieldSchema = z.object({
   })).optional().describe('Options for select/radio fields'),
 });
 
-// --- Execution Schema (simple mode) ---
+// --- Delay Schema ---
+const delaySchema = z.object({
+  beforeAction: z.number().optional().describe('Delay in ms before each action'),
+  afterAction: z.number().optional().describe('Delay in ms after each action'),
+  typing: z.number().optional().describe('Delay in ms between keystrokes'),
+  scroll: z.number().optional().describe('Delay in ms between scroll actions'),
+  jitter: z.number().optional().describe('Random jitter in ms added to delays'),
+});
+
+// --- Scroll Schema ---
+const scrollSchema = z.object({
+  direction: z.enum(['down', 'up']).optional().default('down').describe('Scroll direction'),
+  amount: z.number().optional().default(500).describe('Scroll amount in pixels'),
+  selector: z.string().optional().describe('Scroll within this element'),
+  afterField: z.string().optional().describe('Scroll after filling this field name'),
+  afterSubmit: z.boolean().optional().describe('Scroll after form submission'),
+});
+
+// --- Execution Schema ---
 const executionSchema = z.object({
   fields: z.array(fieldSchema).optional().default([]).describe('Form fields to fill'),
   submit: z.union([
     z.object({ selector: selectorSchema }).describe('Click a submit button'),
     z.object({ key: z.string().describe('Key to press (e.g., "Enter")') }).describe('Press a key to submit'),
   ]).optional().describe('How to submit: click a button OR press a key'),
-  // Alternative submit style
   autosubmit: z.boolean().optional().describe('Auto-submit after filling fields'),
   submitAction: z.enum(['enter', 'click']).optional().describe('Submit method when autosubmit is true'),
   submitSelector: z.string().optional().describe('Button selector when submitAction is "click"'),
-  // Result extraction
   resultSelector: z.union([z.string(), selectorObjectSchema]).optional().describe('Selector for result elements'),
   resultType: z.enum(['single', 'list']).optional().default('single').describe('Single element or list'),
   resultExtract: z.enum([
@@ -69,15 +85,16 @@ const executionSchema = z.object({
   ]).optional().describe('Extraction mode. Overrides resultType when set.'),
   resultAttribute: z.string().optional().describe('Attribute name for "attribute" extraction mode'),
   extractAttributes: z.array(z.string()).optional().describe('Attributes to extract from list results'),
-  // Waits
   waitFor: selectorSchema.optional().describe('Wait for this element after submit'),
   waitTimeout: z.number().optional().default(10000).describe('Wait timeout in ms'),
-  // Additional wait options
   resultWaitSelector: z.string().optional().describe('Wait for this selector before extracting results'),
   resultDelay: z.number().optional().describe('Fixed delay in ms before extraction'),
   resultRequired: z.boolean().optional().describe('If true, throw on wait timeout instead of continuing'),
-  // Root element selector
   selector: z.string().optional().describe('Root element selector'),
+  // Anti-detection
+  delays: delaySchema.optional().describe('Anti-detection delays'),
+  scrolls: z.array(scrollSchema).optional().describe('Scroll actions at specified positions'),
+  verifySelector: z.string().optional().describe('Selector to verify after execution succeeded'),
 });
 
 // --- Action Schema ---
@@ -89,7 +106,6 @@ const actionSchema = z.object({
   params: z.array(paramSchema).optional().default([]),
   execution: executionSchema,
   urlPatterns: z.array(z.string()).optional().describe('URL patterns where this action is available'),
-  // Quality tracking
   stats: z.object({
     runs: z.number().default(0),
     successes: z.number().default(0),
@@ -111,6 +127,8 @@ module.exports = {
   selectorObjectSchema,
   paramSchema,
   fieldSchema,
+  delaySchema,
+  scrollSchema,
   executionSchema,
   actionSchema,
   domainConfigSchema,

@@ -27,15 +27,19 @@ const { setupExitWatchdog } = require(path.join(playwrightMcpDir, 'browser', 'wa
 const { ExtensionContextFactory } = require(path.join(playwrightMcpDir, 'extension', 'extensionContextFactory'));
 const mcpServer = require(path.join(playwrightMcpDir, 'sdk', 'server'));
 
-const { AmiBackend } = require('./src/ami-backend');
+const { XbotBackend } = require('./src/xbot-backend');
+const { loadSession } = require('./src/browser/session');
 const packageJSON = require('./package.json');
 
-const p = program.version('Version ' + packageJSON.version).name('Ami Browser');
+const p = program.version('Version ' + packageJSON.version).name('Xbot Browser');
 
 // Let decorateMCPCommand add all CLI options and the default action handler
 decorateMCPCommand(p, packageJSON.version);
 
-// Override the action handler to use AmiBackend instead of BrowserServerBackend
+// Add custom options
+p.option('--session-file <path>', 'Path to browser session file for persistent login state');
+
+// Override the action handler to use XbotBackend instead of BrowserServerBackend
 p.action(async (options) => {
   options.sandbox = options.sandbox === true ? undefined : false;
   setupExitWatchdog();
@@ -49,6 +53,11 @@ p.action(async (options) => {
 
   const config = await resolveCLIConfig(options);
 
+  // Load session state if provided
+  if (options.sessionFile) {
+    loadSession(config, options.sessionFile);
+  }
+
   if (config.extension) {
     const extensionContextFactory = new ExtensionContextFactory(
       config.browser.launchOptions.channel || 'chrome',
@@ -56,10 +65,10 @@ p.action(async (options) => {
       config.browser.launchOptions.executablePath
     );
     const factory = {
-      name: 'Ami Browser (Extension)',
-      nameInConfig: 'ami-browser',
+      name: 'Xbot Browser (Extension)',
+      nameInConfig: 'xbot-browser',
       version: packageJSON.version,
-      create: () => new AmiBackend(config, extensionContextFactory),
+      create: () => new XbotBackend(config, extensionContextFactory, { sessionFile: options.sessionFile }),
     };
     await mcpServer.start(factory, config.server);
     return;
@@ -67,10 +76,10 @@ p.action(async (options) => {
 
   const browserContextFactory = contextFactory(config);
   const factory = {
-    name: 'Ami Browser',
-    nameInConfig: 'ami-browser',
+    name: 'Xbot Browser',
+    nameInConfig: 'xbot-browser',
     version: packageJSON.version,
-    create: () => new AmiBackend(config, browserContextFactory),
+    create: () => new XbotBackend(config, browserContextFactory, { sessionFile: options.sessionFile }),
   };
 
   await mcpServer.start(factory, config.server);

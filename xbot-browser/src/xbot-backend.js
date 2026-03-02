@@ -7,42 +7,28 @@ const { toMcpTool } = require(path.join(playwrightMcpDir, 'sdk', 'tool'));
 const { z } = require('playwright-core/lib/mcpBundle');
 const { ActionStore, extractDomain } = require('./action-store');
 const { translateAction } = require('./action-translator');
+const { ToolRegistry } = require('./tools/registry');
+const { FallbackTracker } = require('./tools/fallback');
+const { handleCheckSession } = require('./tools/x-tools');
+const { saveSession } = require('./browser/session');
 const {
-  amiExecuteSchema,
+  xbotExecuteSchema,
   browserFallbackSchema,
-  amiMemorySearchSchema,
+  xbotMemorySearchSchema,
+  xCheckSessionSchema,
   addCreateConfigSchema,
   addToolSchema,
   addUpdateToolSchema,
   addDeleteToolSchema,
 } = require('./action-tools');
 
-// Tools that are "read-only" and should NOT trigger save nudges
-const READ_ONLY_FALLBACK_TOOLS = new Set([
-  'browser_snapshot',
-  'browser_console_messages',
-  'browser_network_requests',
-  'browser_tabs',
-  'browser_take_screenshot',
-]);
-
-class AmiBackend {
-  constructor(config, browserContextFactory) {
+class XbotBackend {
+  constructor(config, browserContextFactory, options = {}) {
     this._inner = new BrowserServerBackend(config, browserContextFactory, { allTools: true });
     this._store = new ActionStore();
-    this._currentDomain = null;
-    this._currentUrl = null;
-    this._currentTools = [];       // Tools for current page
-    this._currentConfigs = [];     // Configs for current domain
-    this._lastLookedUpUrl = null;
-
-    // Nudge state
-    this._fallbackNudgePending = false;
-    this._fallbackEverUsed = false;
-    this._extractionHintShown = false;
-    this._fallbackToolsUsed = [];
-    this._fallbackActionLog = [];
-    this._savedToolCategories = new Set();
+    this._registry = new ToolRegistry(this._store);
+    this._fallback = new FallbackTracker();
+    this._sessionFile = options.sessionFile || null;
   }
 
   async initialize(clientInfo) {
@@ -50,28 +36,8 @@ class AmiBackend {
   }
 
   _resetPageState() {
-    this._fallbackNudgePending = false;
-    this._fallbackEverUsed = false;
-    this._extractionHintShown = false;
-    this._fallbackToolsUsed = [];
-    this._fallbackActionLog = [];
-    this._lastLookedUpUrl = null;
-    this._savedToolCategories = new Set();
-  }
-
-  async _lookupToolsForUrl(url) {
-    const domain = extractDomain(url);
-    this._currentDomain = domain;
-    this._currentUrl = url;
-    this._lastLookedUpUrl = url;
-
-    if (domain) {
-      this._currentConfigs = await this._store.getConfigsForDomain(domain);
-      this._currentTools = await this._store.findToolsForUrl(domain, url);
-    } else {
-      this._currentConfigs = [];
-      this._currentTools = [];
-    }
+    this._fallback.reset();
+    this._registry.resetPageState();
   }
 
   async listTools() {
@@ -99,8 +65,9 @@ class AmiBackend {
       navigateSchema,
       snapshotSchema,
       browserFallbackSchema,
-      amiExecuteSchema,
-      amiMemorySearchSchema,
+      xbotExecuteSchema,
+      xbotMemorySearchSchema,
+      xCheckSessionSchema,
       addCreateConfigSchema,
       addToolSchema,
       addUpdateToolSchema,
@@ -116,10 +83,12 @@ class AmiBackend {
         return this._handleSnapshot(rawArguments, progress);
       case 'browser_fallback':
         return this._handleFallback(rawArguments, progress);
-      case 'ami_execute':
+      case 'xbot_execute':
         return this._handleExecute(rawArguments, progress);
-      case 'ami_memory':
+      case 'xbot_memory':
         return this._handleMemorySearch(rawArguments);
+      case 'x:check-session':
+        return handleCheckSession(this._inner, progress);
       case 'add_create-config':
         return this._handleCreateConfig(rawArguments);
       case 'add_tool':
@@ -146,18 +115,18 @@ class AmiBackend {
     result = truncateResult(result);
     const requestedUrl = args.url;
 
-    await this._lookupToolsForUrl(requestedUrl);
+    await this._registry.lookupToolsForUrl(requestedUrl);
 
     // Stage 2: Server-side redirect detection
-    if (this._currentTools.length === 0) {
+    if (this._registry.currentTools.length === 0) {
       const finalUrl = extractFinalUrl(result);
       if (finalUrl && finalUrl !== requestedUrl) {
-        await this._lookupToolsForUrl(finalUrl);
+        await this._registry.lookupToolsForUrl(finalUrl);
       }
     }
 
     // Stage 3: SPA client-side redirect detection
-    if (this._currentTools.length === 0 && this._currentDomain) {
+    if (this._registry.currentTools.length === 0 && this._registry.currentDomain) {
       try {
         const spaResult = await this._inner.callTool('browser_run_code', {
           code: [
@@ -171,25 +140,22 @@ class AmiBackend {
           ].join('\n'),
         });
         const spaUrl = extractFinalUrl(spaResult);
-        if (spaUrl && spaUrl !== this._currentUrl) {
-          await this._lookupToolsForUrl(spaUrl);
+        if (spaUrl && spaUrl !== this._registry.currentUrl) {
+          await this._registry.lookupToolsForUrl(spaUrl);
         }
       } catch {}
     }
 
     // Prepend available tools info
-    const domain = this._currentDomain;
-    if (this._currentTools.length > 0) {
-      const toolList = this._currentTools.map(t => {
-        const params = (t.input_schema || []).map(p => p.name).join(', ');
-        return `  <tool name="${t.name}" params="${params}">${t.description}</tool>`;
-      }).join('\n');
+    const domain = this._registry.currentDomain;
+    if (this._registry.currentTools.length > 0) {
+      const toolList = this._registry.formatToolList();
 
       const extra = `<available-tools domain="${domain}">
 ${toolList}
 </available-tools>
 <navigation-reminder>
-You have saved tools for ${domain}. Use ami_execute to run them.
+You have saved tools for ${domain}. Use xbot_execute to run them.
 If you need browser_fallback for something not yet saved, you MUST save a complete tool with add_tool before you are done. This includes resultSelector for data extraction.
 </navigation-reminder>\n\n`;
       return prependTextToResult(result, extra);
@@ -213,40 +179,41 @@ No saved tools for ${domain}. Use browser_fallback to interact with the page.
 
     // Late SPA detection
     const snapshotUrl = extractFinalUrl(result);
-    if (snapshotUrl && snapshotUrl !== this._lastLookedUpUrl) {
-      await this._lookupToolsForUrl(snapshotUrl);
+    if (snapshotUrl && snapshotUrl !== this._registry.lastLookedUpUrl) {
+      await this._registry.lookupToolsForUrl(snapshotUrl);
 
-      if (this._currentTools.length > 0) {
-        const toolList = this._currentTools.map(t => {
-          const params = (t.input_schema || []).map(p => p.name).join(', ');
-          return `  <tool name="${t.name}" params="${params}">${t.description}</tool>`;
-        }).join('\n');
-        nudgePrefix += `<tools-discovered domain="${this._currentDomain}">
+      if (this._registry.currentTools.length > 0) {
+        const toolList = this._registry.formatToolList();
+        nudgePrefix += `<tools-discovered domain="${this._registry.currentDomain}">
 <context>SPA navigation detected — saved tools are available for this page.</context>
 ${toolList}
-<instruction>Use ami_execute for these tools instead of browser_fallback.</instruction>
+<instruction>Use xbot_execute for these tools instead of browser_fallback.</instruction>
 </tools-discovered>\n\n`;
       }
     }
 
     // Save nudge after fallback action
-    if (this._fallbackNudgePending) {
-      this._fallbackNudgePending = false;
-      nudgePrefix += this._buildSaveNudge() + '\n\n';
+    if (this._fallback.nudgePending) {
+      this._fallback.nudgePending = false;
+      nudgePrefix += this._fallback.buildSaveNudge(
+        this._registry.currentDomain,
+        this._registry.currentTools,
+        this._registry.currentConfigs
+      ) + '\n\n';
     }
 
     // Extraction reminder
-    if (!this._extractionHintShown
-        && this._fallbackEverUsed
-        && !this._savedToolCategories.has('extraction')
-        && !this._fallbackNudgePending) {
-      this._extractionHintShown = true;
+    if (!this._fallback.extractionHintShown
+        && this._fallback.everUsed
+        && !this._fallback.savedToolCategories.has('extraction')
+        && !this._fallback.nudgePending) {
+      this._fallback.extractionHintShown = true;
 
-      const hasIncomplete = this._currentTools.some(t =>
+      const hasIncomplete = this._registry.currentTools.some(t =>
         (t.execution?.fields?.length > 0 || t.execution?.submit) && !t.execution?.resultSelector);
 
       if (hasIncomplete) {
-        const incomplete = this._currentTools.find(t =>
+        const incomplete = this._registry.currentTools.find(t =>
           (t.execution?.fields?.length > 0 || t.execution?.submit) && !t.execution?.resultSelector);
         nudgePrefix += `<tool-incomplete>
 <observation>Your saved tool "${incomplete.name}" has NO resultSelector — it won't return data.</observation>
@@ -286,7 +253,10 @@ ${toolList}
         const desc = (t.description || '').replace(/\n/g, ' ').slice(0, 120);
         return `- **${t.name}**: ${desc}${desc.length >= 120 ? '...' : ''}`;
       }).join('\n');
-      const reminder = this._buildFallbackListReminder();
+      const reminder = this._fallback.buildFallbackListReminder(
+        this._registry.currentDomain,
+        this._registry.currentTools
+      );
       return {
         content: [{ type: 'text', text: `### Available Playwright Tools\n${toolList}\n\nUse \`peek: true\` to inspect a tool's full input schema before calling it.\nExample: \`browser_fallback({ tool: "browser_click", peek: true })\`${reminder}` }],
       };
@@ -307,14 +277,7 @@ ${toolList}
     }
 
     // State tracking
-    if (!READ_ONLY_FALLBACK_TOOLS.has(toolName)) {
-      this._fallbackNudgePending = true;
-      this._fallbackEverUsed = true;
-      if (!this._fallbackToolsUsed.includes(toolName)) {
-        this._fallbackToolsUsed.push(toolName);
-      }
-      this._fallbackActionLog.push({ tool: toolName, args: summarizeArgs(toolName, toolArgs) });
-    }
+    this._fallback.trackFallbackUse(toolName, summarizeArgs(toolName, toolArgs));
 
     let result = await this._inner.callTool(toolName, toolArgs, progress);
     result = truncateResult(result);
@@ -333,79 +296,14 @@ ${toolList}
     }
 
     // Save reminder after fallback action
-    if (!READ_ONLY_FALLBACK_TOOLS.has(toolName)) {
-      const reminder = `\n\n<save-reminder>
-You used browser_fallback (${toolName}). You are NOT done yet.
-Before saying you are done, you MUST save a complete tool:
-  1. add_create-config (if no config exists yet)
-  2. add_tool with fields + submit + resultSelector + input_schema params
-An tool without resultSelector is INCOMPLETE.
-</save-reminder>`;
-      result = appendTextToResult(result, reminder);
+    if (!this._fallback.isReadOnly(toolName)) {
+      result = appendTextToResult(result, this._fallback.buildSaveReminder(toolName));
     }
 
     return result;
   }
 
-  // ─── Nudge builders ───
-
-  _buildSaveNudge() {
-    const domain = this._currentDomain;
-    const hasExistingTools = this._currentTools.length > 0;
-
-    let nudge = `<save-reminder>\n`;
-    nudge += `You have used browser_fallback to interact with this page.\n`;
-    nudge += `You are NOT done yet. Before finishing, complete this checklist:\n\n`;
-
-    if (this._fallbackActionLog.length > 0) {
-      nudge += `Steps you performed:\n`;
-      for (let i = 0; i < this._fallbackActionLog.length; i++) {
-        const entry = this._fallbackActionLog[i];
-        nudge += `  ${i + 1}. ${entry.tool}(${entry.args})\n`;
-      }
-      nudge += `\n`;
-    }
-
-    if (hasExistingTools) {
-      const existingNames = this._currentTools.map(t => t.name).join(', ');
-      nudge += `Existing tools for ${domain}: ${existingNames}\n`;
-      nudge += `→ If these don't cover what you just did, save a new tool. Do NOT duplicate existing ones.\n\n`;
-    }
-
-    const hasConfigs = this._currentConfigs.length > 0;
-    nudge += `Checklist — complete ALL before saying you are done:\n`;
-    if (!hasConfigs) {
-      nudge += `  [ ] Call add_create-config for "${domain}"\n`;
-    }
-    nudge += `  [ ] Call add_tool with a COMPLETE tool covering the steps above\n`;
-    nudge += `  [ ] Include "fields" for form inputs (parameterize all user-changeable values in input_schema)\n`;
-    nudge += `  [ ] Include "submit" for form submission\n`;
-    nudge += `  [ ] Include "waitFor" to wait for results to load\n`;
-    nudge += `  [ ] Include "resultSelector" + "resultType" for data extraction\n`;
-    nudge += `  [ ] Use kebab-case verb-noun name (e.g., "search-google")\n`;
-    nudge += `\n`;
-    nudge += `Only then is your task complete.\n`;
-    nudge += `</save-reminder>`;
-
-    return nudge;
-  }
-
-  _buildFallbackListReminder() {
-    const domain = this._currentDomain;
-    const hasExistingTools = this._currentTools.length > 0;
-
-    if (hasExistingTools) {
-      const toolList = this._currentTools.map(t => t.name).join(', ');
-      return `\n\n<reminder>Saved tools exist for ${domain}: ${toolList}
-Use ami_execute instead of browser_fallback when possible.
-Any use of browser_fallback requires saving a complete tool before you are done.</reminder>`;
-    } else if (domain) {
-      return `\n\n<reminder>No saved tools for ${domain}. Use browser_fallback to complete the task first.</reminder>`;
-    }
-    return '';
-  }
-
-  // ─── ami_execute (run a saved tool) ───
+  // ─── xbot_execute (run a saved tool) ───
 
   async _handleExecute(args, progress) {
     const { toolName, args: toolArgs = {} } = args;
@@ -417,14 +315,7 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Look up tool — first in current page tools, then domain-wide, then globally
-    let tool = this._currentTools.find(t => t.name === toolName);
-    if (!tool && this._currentDomain) {
-      tool = await this._store.findToolByNameForDomain(this._currentDomain, toolName);
-    }
-    if (!tool) {
-      tool = await this._store.findToolByName(toolName);
-    }
+    const tool = await this._registry.resolveToolByName(toolName);
 
     if (!tool) {
       return {
@@ -457,7 +348,7 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       }
     }
 
-    // Translate to Playwright code — translateAction expects { execution, params }
+    // Translate to Playwright code
     let code;
     try {
       code = translateAction({ execution, params }, resolvedArgs);
@@ -469,12 +360,46 @@ Any use of browser_fallback requires saving a complete tool before you are done.
     }
 
     // Execute
-    const result = await this._inner.callTool('browser_run_code', { code }, progress);
+    let result = await this._inner.callTool('browser_run_code', { code }, progress);
+
+    // Selector resilience: detect failures and try fallback selectors
+    const errText = result.content?.[0]?.text || '';
+    const isSelectorFailure = /No element found|Timeout|waiting for selector|locator resolved to/.test(errText);
+
+    if (result.isError && isSelectorFailure && tool.fallback_selectors) {
+      for (const fallbackSet of tool.fallback_selectors) {
+        try {
+          const fallbackExecution = { ...execution, ...fallbackSet };
+          const fallbackCode = translateAction({ execution: fallbackExecution, params }, resolvedArgs);
+          const fallbackResult = await this._inner.callTool('browser_run_code', { code: fallbackCode }, progress);
+          if (!fallbackResult.isError) {
+            // Fallback succeeded — reset failure count
+            if (tool.id && tool.failure_count > 0) {
+              await this._store.resetFailureCount(tool.id);
+            }
+            const header = `### Executed: ${tool.name} (fallback selector)\n`;
+            return prependTextToResult(fallbackResult, header);
+          }
+        } catch {}
+      }
+
+      // All fallbacks failed — increment failure count
+      if (tool.id) {
+        const newCount = await this._store.incrementFailureCount(tool.id);
+        if (newCount >= 3) {
+          result = appendTextToResult(result, `\n\n<relearn-nudge>This tool has failed ${newCount} times. Its selectors may be outdated. Use browser_snapshot to inspect the page and update the tool with add_update-tool.</relearn-nudge>`);
+        }
+      }
+    } else if (!result.isError && tool.id && tool.failure_count > 0) {
+      // Success after previous failures — reset
+      await this._store.resetFailureCount(tool.id);
+    }
+
     const header = `### Executed: ${tool.name}\n`;
     return prependTextToResult(result, header);
   }
 
-  // ─── ami_memory (semantic search) ───
+  // ─── xbot_memory (semantic search) ───
 
   async _handleMemorySearch(args) {
     const { query } = args;
@@ -509,7 +434,7 @@ Any use of browser_fallback requires saving a complete tool before you are done.
         text += '\n';
       }
 
-      text += `Use \`browser_navigate\` to go to the relevant site, then use \`ami_execute\` to run its saved tools.`;
+      text += `Use \`browser_navigate\` to go to the relevant site, then use \`xbot_execute\` to run its saved tools.`;
 
       return {
         content: [{ type: 'text', text }],
@@ -534,13 +459,11 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Auto-fix domain with protocol
     let bareDomain = domain;
     if (/^https?:\/\//.test(domain)) {
       bareDomain = extractDomain(domain);
     }
 
-    // Check if config already exists for this domain + pattern
     const pattern = urlPattern || '/*';
     const existing = await this._store.getConfigForDomainAndPattern(bareDomain, pattern);
     if (existing) {
@@ -558,9 +481,8 @@ Any use of browser_fallback requires saving a complete tool before you are done.
         tags: tags || null,
       });
 
-      // Refresh current configs
-      if (bareDomain === this._currentDomain) {
-        this._currentConfigs = await this._store.getConfigsForDomain(this._currentDomain);
+      if (bareDomain === this._registry.currentDomain) {
+        await this._registry.refreshCurrentConfigs();
       }
 
       return {
@@ -586,7 +508,6 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Verify config exists
     const config = await this._store.getConfigById(configId);
     if (!config) {
       return {
@@ -595,7 +516,6 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Parse JSON inputs
     let inputSchema = [];
     let execution = {};
     try {
@@ -615,13 +535,11 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Validate name format
     const warnings = [];
-    if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(name)) {
+    if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(name) && !name.startsWith('x:')) {
       warnings.push(`**Name format**: "${name}" should be kebab-case verb-noun, e.g., "search-products", "fill-login".`);
     }
 
-    // Check parameterization
     if (execution.fields && execution.fields.length > 0 && (!inputSchema || inputSchema.length === 0)) {
       warnings.push(`**Parameterization**: Tool has ${execution.fields.length} field(s) but no params in inputSchema.`);
     }
@@ -640,24 +558,22 @@ Any use of browser_fallback requires saving a complete tool before you are done.
         execution,
       });
 
-      // Refresh current tools if same domain
-      if (config.domain === this._currentDomain) {
-        this._currentTools = await this._store.findToolsForUrl(this._currentDomain, this._currentUrl);
+      if (config.domain === this._registry.currentDomain) {
+        await this._registry.refreshCurrentTools();
       }
 
-      // Track saved categories
       const isFormTool = (execution.fields?.length > 0) || !!execution.submit;
       const isExtractionTool = !!execution.resultSelector;
-      if (isFormTool) this._savedToolCategories.add('form');
-      if (isExtractionTool) this._savedToolCategories.add('extraction');
+      if (isFormTool) this._fallback.savedToolCategories.add('form');
+      if (isExtractionTool) this._fallback.savedToolCategories.add('extraction');
 
       let followUp = '';
-      if (isFormTool && !isExtractionTool && this._fallbackEverUsed) {
+      if (isFormTool && !isExtractionTool && this._fallback.everUsed) {
         followUp = `\n\n**Tool is INCOMPLETE** — no resultSelector. Use add_update-tool({ toolName: "${tool.name}" }) to add resultSelector and resultType.`;
       }
 
       return {
-        content: [{ type: 'text', text: `### Tool Added\n- **toolId**: ${tool.id}\n- **Name**: ${tool.name}\n- **Config**: ${config.title} (${config.domain})\n- **Has extraction**: ${isExtractionTool ? 'yes' : '**NO — incomplete**'}\n- **Params**: ${(inputSchema || []).map(p => p.name).join(', ') || 'none'}\n\nThis tool is now available via \`ami_execute({ toolName: "${tool.name}", args: {...} })\` on ${config.domain}.${followUp}${warningText}` }],
+        content: [{ type: 'text', text: `### Tool Added\n- **toolId**: ${tool.id}\n- **Name**: ${tool.name}\n- **Config**: ${config.title} (${config.domain})\n- **Has extraction**: ${isExtractionTool ? 'yes' : '**NO — incomplete**'}\n- **Params**: ${(inputSchema || []).map(p => p.name).join(', ') || 'none'}\n\nThis tool is now available via \`xbot_execute({ toolName: "${tool.name}", args: {...} })\` on ${config.domain}.${followUp}${warningText}` }],
       };
     } catch (e) {
       const errMsg = e.message || String(e);
@@ -686,8 +602,7 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Resolve tool by name — try current domain first, then provided domain, then global
-    const searchDomain = domain || this._currentDomain;
+    const searchDomain = domain || this._registry.currentDomain;
     let existing = null;
     if (searchDomain) {
       existing = await this._store.findToolByNameForDomain(searchDomain, toolName);
@@ -731,9 +646,8 @@ Any use of browser_fallback requires saving a complete tool before you are done.
     try {
       const updated = await this._store.updateTool(existing.id, updates);
 
-      // Refresh current tools
-      if (this._currentDomain) {
-        this._currentTools = await this._store.findToolsForUrl(this._currentDomain, this._currentUrl);
+      if (this._registry.currentDomain) {
+        await this._registry.refreshCurrentTools();
       }
 
       return {
@@ -759,8 +673,7 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Resolve tool by name — try current domain first, then provided domain, then global
-    const searchDomain = domain || this._currentDomain;
+    const searchDomain = domain || this._registry.currentDomain;
     let tool = null;
     if (searchDomain) {
       tool = await this._store.findToolByNameForDomain(searchDomain, toolName);
@@ -783,9 +696,8 @@ Any use of browser_fallback requires saving a complete tool before you are done.
       };
     }
 
-    // Refresh current tools
-    if (this._currentDomain) {
-      this._currentTools = await this._store.findToolsForUrl(this._currentDomain, this._currentUrl);
+    if (this._registry.currentDomain) {
+      await this._registry.refreshCurrentTools();
     }
 
     return {
@@ -793,7 +705,11 @@ Any use of browser_fallback requires saving a complete tool before you are done.
     };
   }
 
-  serverClosed(server) {
+  async serverClosed(server) {
+    // Save session state before shutdown
+    if (this._sessionFile && this._inner._context) {
+      await saveSession(this._inner._context, this._sessionFile);
+    }
     this._inner.serverClosed(server);
   }
 }
@@ -909,4 +825,4 @@ function truncateResult(result) {
   return { ...result, content };
 }
 
-module.exports = { AmiBackend };
+module.exports = { XbotBackend };
